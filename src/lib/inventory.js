@@ -1,0 +1,325 @@
+import { db } from "./db";
+
+// ============ STOCK ADJUSTMENTS ============
+
+// Adjust stock (positive or negative) with reason
+export async function adjustStock({ productId, qty, reason, note, cost, user }) {
+  const product = await db.products.get(productId);
+  if (!product) throw new Error("Product not found");
+
+  const newStock = Math.max(0, (product.stock || 0) + qty);
+
+  await db.products.update(productId, {
+    stock: newStock,
+    updatedAt: Date.now(),
+  });
+
+  // Log the movement
+  await db.stockMovements.add({
+    ts: Date.now(),
+    productId,
+    productName: product.name,
+    qty,
+    unit: product.unit,
+    reason, // "restock" | "wastage" | "expired" | "damage" | "correction" | "sale"
+    note: note || "",
+    cost: cost || product.cost || 0,
+    user: user || "system",
+    balanceAfter: newStock,
+  });
+
+  // Audit
+  await db.auditLog.add({
+    ts: Date.now(),
+    user: user || "system",
+    action: "STOCK_ADJUSTED",
+    entity: "product",
+    entityId: productId,
+    details: { qty, reason, note, newStock },
+  });
+
+  return newStock;
+}
+
+// ============ WASTAGE ============
+
+export async function recordWastage({ productId, qty, reason, note, user }) {
+  const product = await db.products.get(productId);
+  if (!product) throw new Error("Product not found");
+
+  const cost = product.cost || 0;
+  const wastageValue = cost * qty;
+
+  // Deduct stock
+  await adjustStock({
+    productId,
+    qty: -Math.abs(qty),
+    reason: "wastage",
+    note: reason + (note ? ` - ${note}` : ""),
+    user,
+  });
+
+  // Dedicated wastage log
+  await db.wastage.add({
+    ts: Date.now(),
+    productId,
+    productName: product.name,
+    qty,
+    unit: product.unit,
+    reason, // "expired" | "damaged" | "stale" | "customer return" | "other"
+    note: note || "",
+    costValue: wastageValue,
+    user: user || "system",
+  });
+
+  return wastageValue;
+}
+
+export async function getWastage({ from, to }) {
+  const all = await db.wastage.toArray();
+  return all.filter((w) => {
+    if (from && w.ts < from) return false;
+    if (to && w.ts > to) return false;
+    return true;
+  });
+}
+
+// ============ EXPIRY / BATCHES ============
+
+export async function addBatch({ productId, qty, expiryDate, cost, batchNo, user }) {
+  const product = await db.products.get(productId);
+  if (!product) throw new Error("Product not found");
+
+  const batchId = await db.batches.add({
+    productId,
+    productName: product.name,
+    qty,
+    unit: product.unit,
+    expiryDate: expiryDate || null, // timestamp
+    cost: cost || product.cost || 0,
+    batchNo: batchNo || "",
+    ts: Date.now(),
+    active: true,
+  });
+
+  // Also increment product stock
+  await adjustStock({
+    productId,
+    qty,
+    reason: "restock",
+    note: `Batch ${batchNo || batchId}`,
+    cost,
+    user,
+  });
+
+  return batchId;
+}
+
+export async function getExpiringBatches(daysAhead = 3) {
+  const now = Date.now();
+  const cutoff = now + daysAhead * 24 * 60 * 60 * 1000;
+  const all = await db.batches.toArray();
+  return all
+    .filter((b) => b.active && b.expiryDate && b.expiryDate <= cutoff && b.qty > 0)
+    .sort((a, b) => a.expiryDate - b.expiryDate);
+}
+
+export async function getExpiredBatches() {
+  const now = Date.now();
+  const all = await db.batches.toArray();
+  return all.filter((b) => b.active && b.expiryDate && b.expiryDate < now && b.qty > 0);
+}
+
+export async function markBatchExpired(batchId, user) {
+  const batch = await db.batches.get(batchId);
+  if (!batch) return;
+
+  await recordWastage({
+    productId: batch.productId,
+    qty: batch.qty,
+    reason: "expired",
+    note: `Batch ${batch.batchNo || batchId}`,
+    user,
+  });
+
+  await db.batches.update(batchId, { active: false, qty: 0 });
+}
+
+// ============ SUPPLIERS ============
+
+export async function addSupplier(supplier) {
+  return await db.suppliers.add({
+    ...supplier,
+    createdAt: Date.now(),
+  });
+}
+
+export async function updateSupplier(id, data) {
+  return await db.suppliers.update(id, { ...data, updatedAt: Date.now() });
+}
+
+export async function deleteSupplier(id) {
+  return await db.suppliers.delete(id);
+}
+
+export async function getAllSuppliers() {
+  return await db.suppliers.toArray();
+}
+
+// ============ PURCHASES ============
+
+export async function recordPurchase({ supplierId, supplierName, items, note, user }) {
+  const total = items.reduce((s, it) => s + it.qty * it.cost, 0);
+
+  const purchaseId = await db.purchases.add({
+    ts: Date.now(),
+    supplierId: supplierId || null,
+    supplierName: supplierName || "Unknown",
+    items: items.map((it) => ({
+      productId: it.productId,
+      productName: it.productName,
+      qty: it.qty,
+      unit: it.unit,
+      cost: it.cost,
+      lineTotal: it.qty * it.cost,
+    })),
+    total,
+    note: note || "",
+    user: user || "system",
+  });
+
+  // Add stock for each item + create batches if expiry provided
+  for (const it of items) {
+    await adjustStock({
+      productId: it.productId,
+      qty: it.qty,
+      reason: "restock",
+      note: `Purchase from ${supplierName || "supplier"}`,
+      cost: it.cost,
+      user,
+    });
+
+    // Update product cost price to latest
+    await db.products.update(it.productId, {
+      cost: it.cost,
+      updatedAt: Date.now(),
+    });
+
+    // Create batch if expiry provided
+    if (it.expiryDate) {
+      await db.batches.add({
+        productId: it.productId,
+        productName: it.productName,
+        qty: it.qty,
+        unit: it.unit,
+        expiryDate: it.expiryDate,
+        cost: it.cost,
+        batchNo: it.batchNo || "",
+        ts: Date.now(),
+        active: true,
+      });
+    }
+  }
+
+  return { purchaseId, total };
+}
+
+export async function getPurchases({ from, to, supplierId }) {
+  const all = await db.purchases.toArray();
+  return all
+    .filter((p) => {
+      if (from && p.ts < from) return false;
+      if (to && p.ts > to) return false;
+      if (supplierId && p.supplierId !== supplierId) return false;
+      return true;
+    })
+    .sort((a, b) => b.ts - a.ts);
+}
+
+// ============ STOCK MOVEMENTS ============
+
+export async function getMovements({ productId, from, to, limit = 100 }) {
+  const all = await db.stockMovements.toArray();
+  return all
+    .filter((m) => {
+      if (productId && m.productId !== productId) return false;
+      if (from && m.ts < from) return false;
+      if (to && m.ts > to) return false;
+      return true;
+    })
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, limit);
+}
+
+// ============ INVENTORY STATS ============
+
+export async function getInventoryStats() {
+  const products = await db.products.toArray();
+  let totalValue = 0;     // at cost
+  let retailValue = 0;    // at selling price
+  let lowCount = 0;
+  let outCount = 0;
+
+  for (const p of products) {
+    const cost = p.cost || 0;
+    const price = p.price || 0;
+    const stock = p.stock || 0;
+
+    totalValue += cost * stock;
+    retailValue += price * stock;
+
+    if (stock === 0) outCount++;
+    else if (stock <= (p.lowStock || 0)) lowCount++;
+  }
+
+  return {
+    totalProducts: products.length,
+    totalValue,
+    retailValue,
+    potentialProfit: retailValue - totalValue,
+    lowCount,
+    outCount,
+  };
+}
+
+// ============ PROFIT CALCULATION ============
+
+export async function calculateProfit({ from, to }) {
+  const sales = await db.sales.toArray();
+  const saleItems = await db.saleItems.toArray();
+  const products = await db.products.toArray();
+
+  const productById = {};
+  for (const p of products) productById[p.id] = p;
+
+  const filteredSales = sales.filter((s) => {
+    if (from && s.ts < from) return false;
+    if (to && s.ts > to) return false;
+    return true;
+  });
+  const saleIds = new Set(filteredSales.map((s) => s.id));
+
+  let revenue = 0;
+  let cost = 0;
+
+  for (const it of saleItems) {
+    if (!saleIds.has(it.saleId)) continue;
+    revenue += it.lineTotal || it.qty * it.price;
+    const p = productById[it.productId];
+    const itemCost = (p?.cost || 0) * it.qty;
+    cost += itemCost;
+  }
+
+  // Deduct wastage cost
+  const wastage = await getWastage({ from, to });
+  const wastageCost = wastage.reduce((s, w) => s + (w.costValue || 0), 0);
+
+  return {
+    revenue,
+    cost,
+    wastageCost,
+    grossProfit: revenue - cost,
+    netProfit: revenue - cost - wastageCost,
+    margin: revenue > 0 ? ((revenue - cost) / revenue) * 100 : 0,
+  };
+}
