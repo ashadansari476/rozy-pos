@@ -9,6 +9,10 @@ import {
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { scheduleOrderAlerts } from "../lib/orderAlerts";
+import SyncIndicator from "../components/ui/SyncIndicator";
+import { startAutoSync, setupNetworkListeners, isSyncConfigured } from "../lib/syncEngine";
+import { useSync } from "../stores/syncStore";
+import OfflineBanner from "../components/ui/OfflineBanner";
 
 const NAV = [
   { to: "/billing",   icon: ShoppingCart,    key: "billing" },
@@ -34,10 +38,20 @@ export default function AppShell() {
   const { shops, currentShop, currentShopId, switchShop, loadShops } = useShop();
   const [mobileNav, setMobileNav] = useState(false);
 
-   useEffect(() => {
+     useEffect(() => {
     loadShops();
-    // Start order alerts scheduler
     scheduleOrderAlerts();
+
+    // Start auto sync (every 5 min + on app open)
+    if (isSyncConfigured()) {
+      startAutoSync();
+    }
+
+    // Listen for online/offline
+    setupNetworkListeners(
+      () => console.log("🟢 Back online"),
+      () => console.log("🔴 Offline")
+    );
   }, []);
 
   useEffect(() => {
@@ -194,9 +208,11 @@ export default function AppShell() {
                 ))}
               </div>
             )}
+            {/* Sync status */}
+            <SyncIndicator />
 
-            {/* Language */}
-                        <button
+                        {/* Language */}
+            <button
               onClick={cycleLang}
               className="px-2 sm:px-3 py-2 text-xs uppercase font-bold flex-shrink-0 rounded-lg transition hover:bg-white/15"
               style={{ color: "#FFF8E7" }}
@@ -206,6 +222,8 @@ export default function AppShell() {
             </button>
           </div>
         </header>
+
+        <OfflineBanner />
 
         <main className="flex-1 overflow-hidden">
           <Outlet />

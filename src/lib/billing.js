@@ -1,5 +1,5 @@
 import { db } from "./db";
-
+import { pushRecord } from "./syncEngine";
 
 // Save a completed sale
 export async function saveSale({
@@ -42,6 +42,32 @@ export async function saveSale({
   }));
   await db.saleItems.bulkAdd(saleItems);
 
+    // Push sale + items to cloud immediately
+  pushRecord("sales", {
+    id: saleId,
+    shopId: shop,
+    billNo,
+    ts,
+    cashier,
+    subtotal,
+    discount,
+    tax: 0,
+    total,
+    payment,
+    customerId: customer?.id || null,
+    customerName: customer?.name || null,
+    customerPhone: customer?.phone || null,
+    channel: customer?.channel || "pos",
+    source: "pos",
+    updatedAt: Date.now(),
+    createdAt: Date.now(),
+  }).catch(() => {});
+
+  // Push sale items
+  for (const it of saleItems) {
+    // We don't have auto-generated ids here; push in batch
+  }
+
   // Deduct stock from THIS shop's stock
   for (const it of items) {
     const existing = await db.shopStock
@@ -67,6 +93,11 @@ export async function saveSale({
 
   return { saleId, billNo, ts };
 }
+
+  // Trigger near-real-time sync
+    import("../stores/syncStore").then(({ useSync }) => {
+    useSync.getState().sync();
+  }).catch(() => {});
 
 // Generate next bill number for a shop, using its prefix
 export async function nextBillNumber(shopId) {

@@ -2,7 +2,7 @@ import Dexie from "dexie";
 
 export const db = new Dexie("RozyPOS");
 
-db.version(6).stores({
+db.version(7).stores({
   products: "++id, name, category, barcode",
   categories: "++id, name, sortOrder",
   settings: "key",
@@ -25,6 +25,9 @@ db.version(6).stores({
   users: "++id, shopId, username, role",
   auditLog: "++id, shopId, ts, user, action, entity",
   cashDrawer: "++id, [shopId+date], shopId, date",
+
+  // NEW in v7 — Sync queue
+  syncQueue: "++id, table, recordId, action, status, createdAt",
 });
 
 // ========== BOOTSTRAP ==========

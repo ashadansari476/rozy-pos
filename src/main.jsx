@@ -5,7 +5,6 @@ import App from "./App.jsx";
 import "./index.css";
 import "./i18n";
 import { bootstrapSettings, migrateExistingDataToRozy } from "./lib/db";
-import ToastContainer from "./components/ui/Toast";
 
 (async () => {
   await bootstrapSettings();
@@ -15,8 +14,17 @@ import ToastContainer from "./components/ui/Toast";
     <React.StrictMode>
       <BrowserRouter>
         <App />
-        <ToastContainer />
       </BrowserRouter>
     </React.StrictMode>
   );
+
+  // Register service worker for offline support
+  if ("serviceWorker" in navigator && import.meta.env.PROD) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker
+        .register("/sw.js")
+        .then(() => console.log("✅ Service Worker registered"))
+        .catch((err) => console.warn("SW registration failed:", err));
+    });
+  }
 })();

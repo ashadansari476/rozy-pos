@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { useApp } from "../stores/appStore";
 import {
   getSupabaseUrl, getSupabaseKey, setSupabaseConfig,
-  clearSupabaseConfig, testConnection, fullSync, getSyncStatus,
+  clearSupabaseConfig, testConnection, getSyncStatus,
 } from "../lib/supabase";
 import { Cloud, Check, X, RefreshCw, Save, AlertTriangle } from "lucide-react";
+import { fullSync } from "../lib/syncEngine";
 
 export default function SyncSettings() {
   const user = useApp((s) => s.user);

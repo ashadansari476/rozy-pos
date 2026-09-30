@@ -1,13 +1,13 @@
 import { saveSale } from "./billing";
 import { nextBillNumber } from "./billing";
-
 import { db } from "./db";
+import { pushRecord } from "./syncEngine";
 
 // ============ CUSTOMERS ============
 
 export async function addCustomer({ name, phone, address, notes, birthday }) {
   const now = Date.now();
-  return await db.customers.add({
+  const id = await db.customers.add({
     name: name.trim(),
     phone: (phone || "").trim(),
     address: (address || "").trim(),
@@ -18,10 +18,29 @@ export async function addCustomer({ name, phone, address, notes, birthday }) {
     totalOrders: 0,
     lastVisit: now,
   });
+
+  // Push to cloud
+  pushRecord("customers", {
+    id,
+    name: name.trim(),
+    phone: (phone || "").trim(),
+    address: (address || "").trim(),
+    notes: (notes || "").trim(),
+    birthday: birthday || null,
+    createdAt: now,
+    totalSpent: 0,
+    totalOrders: 0,
+    lastVisit: now,
+    updatedAt: now,
+  }).catch(() => {});
+
+  return id;
 }
 
 export async function updateCustomer(id, data) {
-  return await db.customers.update(id, { ...data, updatedAt: Date.now() });
+  const result = await db.customers.update(id, { ...data, updatedAt: Date.now() });
+  pushRecord("customers", { id, ...data, updatedAt: Date.now() }).catch(() => {});
+  return result;
 }
 
 export async function deleteCustomer(id) {
@@ -63,7 +82,6 @@ export async function getCustomerStats(customerId) {
   const totalBills = customerSales.length;
   const avgBill = totalBills > 0 ? totalSpent / totalBills : 0;
 
-  // Favorite items
   const saleIds = new Set(customerSales.map((s) => s.id));
   const items = await db.saleItems.toArray();
   const myItems = items.filter((i) => saleIds.has(i.saleId));
@@ -76,7 +94,6 @@ export async function getCustomerStats(customerId) {
     .slice(0, 5)
     .map(([name, qty]) => ({ name, qty }));
 
-  // Last purchase date
   const lastSale = customerSales.sort((a, b) => b.ts - a.ts)[0];
 
   return {
@@ -97,7 +114,7 @@ export async function getCustomerHistory(customerId) {
   return mySales;
 }
 
-// ============ ORDERS (Advance Bookings) ============
+// ============ ORDERS ============
 
 export async function createOrder({
   customerId,
@@ -106,11 +123,13 @@ export async function createOrder({
   items,
   deliveryDate,
   notes,
-  orderType, // "pickup" | "delivery"
+  orderType,
   address,
   advanceAmount,
   totalAmount,
   user,
+  channel,
+  source,
 }) {
   const now = Date.now();
   const orderNo = `ORD-${now.toString().slice(-6)}`;
@@ -135,12 +154,14 @@ export async function createOrder({
     notes: notes || "",
     orderType: orderType || "pickup",
     address: address || "",
-    status: "pending", // pending | ready | delivered | cancelled
+    status: "pending",
+    channel: channel || "pos",
+    source: source || "pos",
     createdAt: now,
     createdBy: user || "system",
+    updatedAt: now,
   });
 
-  // Log advance payment if any
   if (advanceAmount > 0) {
     await db.payments.add({
       orderId,
@@ -159,6 +180,33 @@ export async function createOrder({
     entityId: orderId,
     details: { orderNo, totalAmount, advanceAmount },
   });
+
+  // Push order to cloud
+  pushRecord("orders", {
+    id: orderId,
+    orderNo,
+    customerId: customerId || null,
+    customerName: customerName || "Walk-in",
+    customerPhone: customerPhone || "",
+    totalAmount,
+    advanceAmount: advanceAmount || 0,
+    balanceAmount: totalAmount - (advanceAmount || 0),
+    deliveryDate: deliveryDate ? new Date(deliveryDate).getTime() : now,
+    notes: notes || "",
+    orderType: orderType || "pickup",
+    address: address || "",
+    status: "pending",
+    channel: channel || "pos",
+    source: source || "pos",
+    createdAtTs: now,
+    createdBy: user || "system",
+    updatedAt: now,
+  }).catch(() => {});
+
+  // Trigger near-real-time sync
+  import("../stores/syncStore").then(({ useSync }) => {
+    useSync.getState().sync();
+  }).catch(() => {});
 
   return { orderId, orderNo };
 }
@@ -179,6 +227,8 @@ export async function updateOrderStatus(orderId, status, user) {
     entityId: orderId,
     details: { status },
   });
+
+  pushRecord("orders", { id: orderId, status, updatedAt: now }).catch(() => {});
 }
 
 export async function recordOrderPayment(orderId, amount, type = "balance", user) {
@@ -256,11 +306,12 @@ export async function getOrderStats() {
     overdueOrders: overdue,
   };
 }
+
 // ============ COMPLETE ORDER (Auto-Bill on Delivery) ============
 
 export async function completeOrder({
   orderId,
-  paymentAmount,      // total cash/upi/card collected NOW (balance)
+  paymentAmount,
   paymentMode = "Cash",
   counter = "Rozy",
   user,
@@ -271,7 +322,6 @@ export async function completeOrder({
 
   const now = Date.now();
 
-  // Generate bill number (RZ-0001 / WR-0001)
   const prefix = counter === "Rozy" ? "RZ" : counter === "Warish" ? "WR" : "GN";
   const seqKey = `billSeq_${counter}`;
   const rec = await db.settings.get(seqKey);
@@ -279,13 +329,13 @@ export async function completeOrder({
   await db.settings.put({ key: seqKey, value: next });
   const billNo = `${prefix}-${String(next).padStart(4, "0")}`;
 
-  // Build sale record from order
   const totalPaid = (order.advanceAmount || 0) + (paymentAmount || 0);
   const change = Math.max(0, totalPaid - order.totalAmount);
 
   const saleId = await db.sales.add({
     billNo,
     counter,
+    shopId: counter.toLowerCase(),
     cashier: user || "system",
     ts: now,
     subtotal: order.totalAmount,
@@ -303,10 +353,12 @@ export async function completeOrder({
     customerName: order.customerName,
     customerPhone: order.customerPhone,
     fromOrderId: orderId,
+    channel: order.channel || "pos",
+    source: order.source || "pos",
     note: `From order ${order.orderNo}`,
+    updatedAt: now,
   });
 
-  // Save sale items + deduct stock
   for (const it of order.items) {
     await db.saleItems.add({
       saleId,
@@ -319,7 +371,6 @@ export async function completeOrder({
       lineTotal: it.lineTotal,
     });
 
-    // Deduct stock
     const product = await db.products.get(it.productId);
     if (product) {
       const newStock = Math.max(0, (product.stock || 0) - it.qty);
@@ -328,7 +379,6 @@ export async function completeOrder({
         updatedAt: now,
       });
 
-      // Log stock movement
       await db.stockMovements.add({
         ts: now,
         productId: it.productId,
@@ -344,7 +394,6 @@ export async function completeOrder({
     }
   }
 
-  // Record balance payment
   if (paymentAmount > 0) {
     await db.payments.add({
       orderId,
@@ -355,7 +404,6 @@ export async function completeOrder({
     });
   }
 
-  // Update order status
   await db.orders.update(orderId, {
     status: "delivered",
     deliveredAt: now,
@@ -366,7 +414,6 @@ export async function completeOrder({
     updatedAt: now,
   });
 
-  // Update customer lifetime value
   if (order.customerId) {
     const cust = await db.customers.get(order.customerId);
     if (cust) {
@@ -378,7 +425,6 @@ export async function completeOrder({
     }
   }
 
-  // Audit
   await db.auditLog.add({
     ts: now,
     user: user || "system",
@@ -387,6 +433,11 @@ export async function completeOrder({
     entityId: orderId,
     details: { orderNo: order.orderNo, billNo, totalPaid, paymentMode },
   });
+
+  // Trigger sync
+  import("../stores/syncStore").then(({ useSync }) => {
+    useSync.getState().sync();
+  }).catch(() => {});
 
   return { billNo, saleId, change };
 }

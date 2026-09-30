@@ -1,0 +1,82 @@
+// ============================================================
+// Offline Utilities
+// ============================================================
+import { db } from "./db";
+
+// ---------- Detect online/offline ----------
+export function isOnline() {
+  return typeof navigator !== "undefined" && navigator.onLine;
+}
+
+// ---------- Check if sync is configured ----------
+export function hasSyncConfig() {
+  return !!(
+    localStorage.getItem("rozy-pos-supabase-url") &&
+    localStorage.getItem("rozy-pos-supabase-key")
+  );
+}
+
+// ---------- Get pending queue count ----------
+export async function getPendingCount() {
+  try {
+    const count = await db.syncQueue.where("status").equals("pending").count();
+    return count;
+  } catch (e) {
+    return 0;
+  }
+}
+
+// ---------- Queue status info ----------
+export async function getQueueStatus() {
+  const [pending, failed, done] = await Promise.all([
+    db.syncQueue.where("status").equals("pending").count().catch(() => 0),
+    db.syncQueue.where("status").equals("failed").count().catch(() => 0),
+    db.syncQueue.where("status").equals("done").count().catch(() => 0),
+  ]);
+  return { pending, failed, done };
+}
+
+// ---------- Connection quality probe ----------
+export async function probeConnection() {
+  if (!isOnline()) return { online: false, quality: "none" };
+
+  const url = localStorage.getItem("rozy-pos-supabase-url");
+  if (!url) return { online: true, quality: "unknown" };
+
+  const start = Date.now();
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+    const key = localStorage.getItem("rozy-pos-supabase-key");
+    const res = await fetch(`${url}/rest/v1/products?select=id&limit=1`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    const latency = Date.now() - start;
+
+    if (res.ok) {
+      return {
+        online: true,
+        quality: latency < 500 ? "excellent" : latency < 1500 ? "good" : "slow",
+        latency,
+      };
+    }
+    return { online: true, quality: "unstable", latency };
+  } catch (e) {
+    return { online: true, quality: "unreachable", error: e.message };
+  }
+}
+
+// ---------- Get a friendly label for connectivity ----------
+export function getConnectionLabel(probe) {
+  if (!probe.online) return { text: "Offline", color: "red" };
+  if (probe.quality === "excellent") return { text: "Online", color: "green" };
+  if (probe.quality === "good") return { text: "Online", color: "green" };
+  if (probe.quality === "slow") return { text: "Slow connection", color: "amber" };
+  if (probe.quality === "unstable") return { text: "Unstable", color: "amber" };
+  if (probe.quality === "unreachable") return { text: "Server unreachable", color: "red" };
+  return { text: "Online", color: "green" };
+}
