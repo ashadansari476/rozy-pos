@@ -13,6 +13,8 @@ import SyncIndicator from "../components/ui/SyncIndicator";
 import { startAutoSync, setupNetworkListeners, isSyncConfigured } from "../lib/syncEngine";
 import { useSync } from "../stores/syncStore";
 import OfflineBanner from "../components/ui/OfflineBanner";
+import { filterNavByPermissions, canSwitchShops } from "../lib/permissions";
+import BackupReminder from "../components/ui/BackupReminder";
 
 const NAV = [
   { to: "/billing",   icon: ShoppingCart,    key: "billing" },
@@ -107,7 +109,7 @@ export default function AppShell() {
         </div>
 
         <nav className="flex-1 overflow-y-auto p-2">
-          {NAV.map(({ to, icon: Icon, key, ownerOnly }) => {
+                    {filterNavByPermissions(user, NAV).map(({ to, icon: Icon, key, ownerOnly }) => {
             if (ownerOnly && !isOwner) return null;
             return (
               <NavLink
@@ -182,7 +184,7 @@ export default function AppShell() {
 
           <div className="ml-auto flex items-center gap-2 flex-shrink-0">
             {/* Shop switcher — owner only, always visible */}
-            {isOwner && availableShops.length > 1 && (
+                        {canSwitchShops(user) && availableShops.length > 1 && (
               <div className="flex items-center rounded-xl p-1"
                    style={{ background: "rgba(0,0,0,0.25)" }}>
                 {availableShops.map((s) => (
@@ -224,7 +226,7 @@ export default function AppShell() {
         </header>
 
         <OfflineBanner />
-
+        <BackupReminder />
         <main className="flex-1 overflow-hidden">
           <Outlet />
         </main>

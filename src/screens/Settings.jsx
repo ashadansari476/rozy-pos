@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import {
-  Store, Users, Settings as SettingsIcon, ChevronRight, Cloud,
+  Store, Users, Settings as SettingsIcon, ChevronRight, Cloud, Database,
 } from "lucide-react";
 
 export default function Settings() {
@@ -24,6 +24,12 @@ export default function Settings() {
       label: "Cloud Sync",
       desc: "Sync products between your shops via Supabase",
       to: "/settings/sync",
+    },
+    {
+      icon: Database,
+      label: "Backup & Restore",
+      desc: "Download your full database as a file, or restore from a backup",
+      to: "/settings/backup",
     },
     {
       icon: SettingsIcon,

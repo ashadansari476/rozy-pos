@@ -50,8 +50,15 @@ export const useApp = create(
         return { ok: true };
       },
 
-      logout: () => set({ user: null, counter: null }),
-      setCounter: (counter) => set({ counter }),
+            logout: () => set({ user: null, counter: null }),
+
+      setCounter: (counter) => {
+        const u = get().user;
+        // Cashiers are locked to their assigned shop
+        if (u && u.role === "cashier") return;
+        set({ counter });
+      },
+
       setLanguage: (language) => set({ language }),
     }),
        {

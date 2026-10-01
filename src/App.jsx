@@ -21,6 +21,8 @@ import AuditLog from "./screens/AuditLog";
 import DayEnd from "./screens/DayEnd";
 import CompareShops from "./screens/CompareShops";
 import ThemePreview from "./screens/ThemePreview";
+import Backup from "./screens/Backup";
+import ProtectedRoute from "./components/auth/ProtectedRoute";
 
 export default function App() {
   const user = useApp((s) => s.user);
@@ -30,25 +32,34 @@ export default function App() {
     <Routes>
       <Route element={<AppShell />}>
         <Route path="/" element={<Navigate to="/billing" replace />} />
-        <Route path="/billing" element={<Billing />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/products" element={<Products />} />
-        <Route path="/inventory" element={<Inventory />} />
-        <Route path="/suppliers" element={<Suppliers />} />
-        <Route path="/customers" element={<Customers />} />
-        <Route path="/orders" element={<Orders />} />
-        <Route path="/reports" element={<Reports />} />
-        <Route path="/expenses" element={<Expenses />} />
-        <Route path="/targets" element={<Targets />} />
-        <Route path="/audit" element={<AuditLog />} />
-        <Route path="/day-end" element={<DayEnd />} />
-        <Route path="/settings" element={<Settings />} />
-<Route path="/settings/shops" element={<ShopSettings />} />
-<Route path="/settings/cashiers" element={<Cashiers />} />
+
+        {/* Cashier accessible */}
+        <Route path="/billing" element={<ProtectedRoute pageKey="billing"><Billing /></ProtectedRoute>} />
+        <Route path="/products" element={<ProtectedRoute pageKey="products"><Products /></ProtectedRoute>} />
+        <Route path="/inventory" element={<ProtectedRoute pageKey="inventory"><Inventory /></ProtectedRoute>} />
+        <Route path="/customers" element={<ProtectedRoute pageKey="customers"><Customers /></ProtectedRoute>} />
+        <Route path="/orders" element={<ProtectedRoute pageKey="orders"><Orders /></ProtectedRoute>} />
+
+        {/* Owner only */}
+        <Route path="/dashboard" element={<ProtectedRoute pageKey="dashboard"><Dashboard /></ProtectedRoute>} />
+        <Route path="/suppliers" element={<ProtectedRoute pageKey="suppliers"><Suppliers /></ProtectedRoute>} />
+        <Route path="/reports" element={<ProtectedRoute pageKey="reports"><Reports /></ProtectedRoute>} />
+        <Route path="/expenses" element={<ProtectedRoute pageKey="expenses"><Expenses /></ProtectedRoute>} />
+        <Route path="/targets" element={<ProtectedRoute pageKey="targets"><Targets /></ProtectedRoute>} />
+        <Route path="/audit" element={<ProtectedRoute pageKey="audit"><AuditLog /></ProtectedRoute>} />
+        <Route path="/day-end" element={<ProtectedRoute pageKey="day-end"><DayEnd /></ProtectedRoute>} />
+        <Route path="/compare" element={<ProtectedRoute pageKey="compare"><CompareShops /></ProtectedRoute>} />
+        <Route path="/theme-preview" element={<ProtectedRoute pageKey="dashboard"><ThemePreview /></ProtectedRoute>} />
+
+        {/* Settings — all protected by "settings" key */}
+        <Route path="/settings" element={<ProtectedRoute pageKey="settings"><Settings /></ProtectedRoute>} />
+        <Route path="/settings/shops" element={<ProtectedRoute pageKey="settings"><ShopSettings /></ProtectedRoute>} />
+        <Route path="/settings/cashiers" element={<ProtectedRoute pageKey="settings"><Cashiers /></ProtectedRoute>} />
+        <Route path="/settings/sync" element={<ProtectedRoute pageKey="settings"><SyncSettings /></ProtectedRoute>} />
+        <Route path="/settings/backup" element={<ProtectedRoute pageKey="settings"><Backup /></ProtectedRoute>} />
+
+        {/* Fallback */}
         <Route path="*" element={<Navigate to="/billing" replace />} />
-        <Route path="/settings/sync" element={<SyncSettings />} />
-        <Route path="/compare" element={<CompareShops />} />
-        <Route path="/theme-preview" element={<ThemePreview />} />      
       </Route>
     </Routes>
   );
