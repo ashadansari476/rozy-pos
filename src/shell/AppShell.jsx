@@ -78,9 +78,15 @@ export default function AppShell() {
   return (
     <div className="h-screen flex bg-bg">
       {/* Sidebar */}
-            <aside className={`${mobileNav ? "fixed inset-y-0 left-0 z-50 w-64" : "hidden xl:flex"}
-                         xl:static xl:w-64 flex-shrink-0 wood-sidebar
-                         flex-col transition-all`}>
+            <aside
+          className={`${mobileNav ? "fixed inset-y-0 left-0 z-50 w-64" : "hidden xl:flex"}
+                     xl:static xl:w-64 flex-shrink-0 wood-sidebar
+                     flex-col transition-all`}
+          style={{
+            maxHeight: "100vh",
+            overflowY: "hidden",
+          }}
+        >
                 <div className="p-4" style={{ borderBottom: "1px solid rgba(107, 68, 35, 0.25)" }}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl2 flex items-center justify-center text-xl"
@@ -108,7 +114,13 @@ export default function AppShell() {
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto p-2">
+        <nav
+          className="flex-1 overflow-y-auto p-2"
+          style={{
+            WebkitOverflowScrolling: "touch",
+            overscrollBehavior: "contain",
+          }}
+        >
                     {filterNavByPermissions(user, NAV).map(({ to, icon: Icon, key, ownerOnly }) => {
             if (ownerOnly && !isOwner) return null;
             return (
