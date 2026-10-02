@@ -18,7 +18,7 @@ export default function ProductGrid({ products, onAdd }) {
           <button
             key={p.id}
             onClick={() => onAdd(p)}
-            className="product-tile p-2 sm:p-3 text-left active:scale-[0.97] transition"
+            className="product-tile p-2 sm:p-3 text-left active:scale-[0.97] transition overflow-hidden"
           >
             {/* Image */}
             <div
@@ -41,27 +41,32 @@ export default function ProductGrid({ products, onAdd }) {
               )}
             </div>
 
-            {/* Name — truncate to 2 lines max */}
+            {/* Name — single line, truncate with ellipsis */}
             <div
-              className="font-semibold text-xs sm:text-sm leading-tight line-clamp-2"
+              className="font-semibold text-xs sm:text-sm truncate"
               style={{
                 color: "#3A2410",
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
+                whiteSpace: "nowrap",
                 overflow: "hidden",
-                minHeight: "2.4em",
+                textOverflow: "ellipsis",
               }}
+              title={p.name}
             >
               {p.name}
             </div>
 
             {/* Price + Unit */}
-            <div className="flex items-baseline justify-between mt-1.5">
-              <div className="font-mono font-bold text-sm" style={{ color: "#8B1E1E" }}>
+            <div className="flex items-baseline justify-between mt-1">
+              <div
+                className="font-mono font-bold text-sm"
+                style={{ color: "#8B1E1E" }}
+              >
                 ₹{p.price}
               </div>
-              <div className="text-[10px] sm:text-xs" style={{ color: "#6B4423" }}>
+              <div
+                className="text-[10px] sm:text-xs"
+                style={{ color: "#6B4423" }}
+              >
                 /{p.unit}
               </div>
             </div>

@@ -78,8 +78,8 @@ export default function AppShell() {
   return (
     <div className="h-screen flex bg-bg">
       {/* Sidebar */}
-      <aside className={`${mobileNav ? "fixed inset-y-0 left-0 z-50 w-64" : "hidden lg:flex"}
-                         lg:static lg:w-64 flex-shrink-0 wood-sidebar
+            <aside className={`${mobileNav ? "fixed inset-y-0 left-0 z-50 w-64" : "hidden xl:flex"}
+                         xl:static xl:w-64 flex-shrink-0 wood-sidebar
                          flex-col transition-all`}>
                 <div className="p-4" style={{ borderBottom: "1px solid rgba(107, 68, 35, 0.25)" }}>
           <div className="flex items-center gap-3">
@@ -99,9 +99,9 @@ export default function AppShell() {
                 {currentShop?.address || "Sukhia Pokhri"}
               </div>
             </div>
-            <button
+                        <button
               onClick={() => setMobileNav(false)}
-              className="lg:hidden text-ink-muted p-1"
+              className="xl:hidden text-ink p-1"
             >
               <X size={18} />
             </button>
@@ -160,18 +160,18 @@ export default function AppShell() {
         </div>
       </aside>
 
-      {mobileNav && (
-        <div className="fixed inset-0 bg-black/30 z-40 lg:hidden"
+            {mobileNav && (
+        <div className="fixed inset-0 bg-black/30 z-40 xl:hidden"
              onClick={() => setMobileNav(false)} />
       )}
 
       <div className="flex-1 flex flex-col min-w-0">
                 <header className="h-14 px-3 lg:px-5 flex items-center gap-2 wood-header">
-          <button
+                    <button
             onClick={() => setMobileNav(true)}
-            className="lg:hidden p-2 text-ink-muted hover:text-primary flex-shrink-0"
+            className="xl:hidden p-2 text-white hover:bg-white/20 rounded-lg flex-shrink-0"
           >
-            <Menu size={20} />
+            <Menu size={22} />
           </button>
 
                     {/* Current Shop Name */}
