@@ -25,8 +25,6 @@ db.version(7).stores({
   users: "++id, shopId, username, role",
   auditLog: "++id, shopId, ts, user, action, entity",
   cashDrawer: "++id, [shopId+date], shopId, date",
-
-  // NEW in v7 — Sync queue
   syncQueue: "++id, table, recordId, action, status, createdAt",
 });
 
@@ -61,8 +59,17 @@ export async function bootstrapSettings() {
       },
       { key: "ownerPin", value: "9832" },
     ]);
+  }
 
-    await seedCategoriesIfMissing();
+  // ALWAYS ensure categories exist (fixes blank category dropdown after reset)
+  const categoryCount = await db.categories.count();
+  if (categoryCount === 0) {
+    await db.categories.bulkPut([
+      { name: "Bakery", sortOrder: 1, icon: "🥖" },
+      { name: "Sweets", sortOrder: 2, icon: "🍬" },
+      { name: "Snacks", sortOrder: 3, icon: "🥨" },
+      { name: "Beverages", sortOrder: 4, icon: "☕" },
+    ]);
   }
 
   // Always ensure shops exist
@@ -104,24 +111,6 @@ export async function bootstrapSettings() {
 }
 
 // ========== HELPERS ==========
-async function seedCategoriesIfMissing() {
-  const defaults = [
-    { name: "Bakery", sortOrder: 1, icon: "🥖" },
-    { name: "Sweets", sortOrder: 2, icon: "🍬" },
-    { name: "Snacks", sortOrder: 3, icon: "🥨" },
-    { name: "Beverages", sortOrder: 4, icon: "☕" },
-  ];
-
-  const existing = await db.categories.toArray();
-  const existingNames = new Set(existing.map((c) => c.name.toLowerCase().trim()));
-
-  for (const cat of defaults) {
-    if (!existingNames.has(cat.name.toLowerCase().trim())) {
-      await db.categories.add(cat);
-    }
-  }
-}
-
 async function dedupeCategories() {
   const all = await db.categories.toArray();
   const seen = new Map();

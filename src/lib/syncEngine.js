@@ -1,8 +1,6 @@
 // ============================================================
 // ROZY POS — Bidirectional Sync Engine
-// ============================================================
 // Syncs local IndexedDB ↔ Supabase cloud
-// Handles: queuing, retrying, conflict resolution
 // ============================================================
 
 import { db } from "./db";
@@ -32,7 +30,7 @@ export const SYNC_TABLES = [
   { name: "payments",        supabaseTable: "payments",        key: "id" },
 ];
 
-// Field name converters (camelCase local ↔ snake_case cloud)
+// ---------- Field name converters ----------
 const FIELD_MAP = {
   sales: {
     shopId: "shop_id",
@@ -203,7 +201,6 @@ function toCloud(localRecord, tableName) {
   const out = {};
   for (const [k, v] of Object.entries(localRecord)) {
     const cloudKey = map[k] || k;
-    // Convert numeric timestamps to ISO strings for Supabase timestamp columns
     if (cloudKey === "updated_at" && typeof v === "number") {
       out[cloudKey] = new Date(v).toISOString();
     } else if (cloudKey === "created_at" && typeof v === "number") {
@@ -229,6 +226,7 @@ function toLocal(cloudRecord, tableName) {
   return out;
 }
 
+// ---------- Supabase fetch with retry ----------
 async function sbFetch(path, options = {}) {
   const url = getSupabaseUrl();
   const key = getSupabaseKey();
@@ -236,7 +234,6 @@ async function sbFetch(path, options = {}) {
 
   const fullUrl = `${url}/rest/v1${path}`;
 
-  // Retry logic for flaky connections (3 attempts)
   let lastError;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -258,7 +255,6 @@ async function sbFetch(path, options = {}) {
       return res.json().catch(() => null);
     } catch (err) {
       lastError = err;
-      // Only retry on network errors (not on 4xx)
       const isNetworkError =
         err.message.includes("Failed to fetch") ||
         err.message.includes("ERR_CERT") ||
@@ -267,14 +263,13 @@ async function sbFetch(path, options = {}) {
 
       if (!isNetworkError || attempt === 2) throw err;
 
-      // Wait before retry: 1s, 3s
       await new Promise((r) => setTimeout(r, 1000 * (attempt * 2 + 1)));
     }
   }
   throw lastError;
 }
 
-// ---------- Sync status check ----------
+// ---------- Status checks ----------
 export function isSyncConfigured() {
   return !!(getSupabaseUrl() && getSupabaseKey());
 }
@@ -290,15 +285,12 @@ export async function pushTable(tableName, records) {
   const config = SYNC_TABLES.find((t) => t.name === tableName);
   if (!config) return { pushed: 0 };
 
-  // Convert to cloud format
   const payload = records.map((r) => {
     const cloud = toCloud(r, tableName);
-    // Remove any local-only fields
     delete cloud.syncVersion;
     return cloud;
   });
 
-  // Upsert (merge duplicates)
   await sbFetch(`/${config.supabaseTable}`, {
     method: "POST",
     body: JSON.stringify(payload),
@@ -312,11 +304,21 @@ export async function pullTable(tableName, sinceTs) {
   const config = SYNC_TABLES.find((t) => t.name === tableName);
   if (!config) return { pulled: 0, updated: 0 };
 
-  // Tables that don't have updated_at column — pull everything
-  const noUpdatedAtTables = ["auditLog", "stockMovements", "wastage", "saleItems", "orderItems", "purchaseItems", "payments"];
+  const noUpdatedAtTables = [
+    "auditLog", "stockMovements", "wastage",
+    "saleItems", "orderItems", "purchaseItems", "payments",
+  ];
 
-  let query = `/${config.supabaseTable}?select=*&limit=500`;
-  if (sinceTs && !noUpdatedAtTables.includes(tableName)) {
+  let query = `/${config.supabaseTable}?select=*&limit=500&order=id.desc`;
+
+  const DAYS_BACK = 7;
+  const recentSyncThreshold = Date.now() - DAYS_BACK * 24 * 60 * 60 * 1000;
+
+  if (
+    sinceTs &&
+    sinceTs > recentSyncThreshold &&
+    !noUpdatedAtTables.includes(tableName)
+  ) {
     query += `&updated_at=gt.${new Date(sinceTs).toISOString()}`;
   }
 
@@ -334,11 +336,10 @@ export async function pullTable(tableName, sinceTs) {
       await db.table(tableName).put(local);
       pulled++;
     } else {
-      // Conflict: latest updated_at wins
       const localTs = existing.updatedAt || existing.createdAt || 0;
       const remoteTs = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
       if (remoteTs > localTs) {
-        await db.table(tableName).put({ ...existing, ...local });
+        await db.table(tableName).put({ ...local, ...existing, ...local });
         updated++;
       }
     }
@@ -347,11 +348,10 @@ export async function pullTable(tableName, sinceTs) {
   return { pulled, updated };
 }
 
-// ---------- SINGLE RECORD PUSH (for critical actions) ----------
+// ---------- SINGLE RECORD PUSH ----------
 export async function pushRecord(tableName, record) {
   if (!isSyncConfigured()) return;
   if (!isOnline()) {
-    // Queue for later
     await queueOperation(tableName, record.id, "upsert", record);
     return;
   }
@@ -359,27 +359,24 @@ export async function pushRecord(tableName, record) {
   try {
     await pushTable(tableName, [record]);
   } catch (e) {
-    // Queue on failure
     await queueOperation(tableName, record.id, "upsert", record);
   }
 }
 
-// ---------- BATCH PUSH (for edits) ----------
+// ---------- BATCH PUSH ----------
 let batchQueue = new Map();
 let batchTimer = null;
 
 export function schedulePushBatch(tableName, record) {
   if (!isSyncConfigured()) return;
 
-  // Add to batch queue
   if (!batchQueue.has(tableName)) {
     batchQueue.set(tableName, new Map());
   }
   batchQueue.get(tableName).set(record.id, record);
 
-  // Reset timer
   if (batchTimer) clearTimeout(batchTimer);
-  batchTimer = setTimeout(flushBatch, 30000); // 30 seconds
+  batchTimer = setTimeout(flushBatch, 30000);
 }
 
 async function flushBatch() {
@@ -392,7 +389,6 @@ async function flushBatch() {
     try {
       await pushTable(tableName, Array.from(records.values()));
     } catch (e) {
-      // Queue for later
       for (const record of records.values()) {
         await queueOperation(tableName, record.id, "upsert", record);
       }
@@ -400,7 +396,7 @@ async function flushBatch() {
   }
 }
 
-// ---------- SYNC QUEUE (retry mechanism) ----------
+// ---------- SYNC QUEUE ----------
 export async function queueOperation(tableName, recordId, action, data) {
   await db.syncQueue.add({
     table: tableName,
@@ -414,7 +410,7 @@ export async function queueOperation(tableName, recordId, action, data) {
 }
 
 export async function processQueue() {
-  if (!isOnline()) return { processed: 0 };
+  if (!isOnline()) return { processed: 0, failed: 0 };
 
   const pending = await db.syncQueue
     .where("status")
@@ -422,24 +418,29 @@ export async function processQueue() {
     .toArray();
 
   let processed = 0;
+  let failed = 0;
 
   for (const op of pending) {
     try {
       await pushTable(op.table, [op.data]);
-      await db.syncQueue.update(op.id, { status: "done" });
+      await db.syncQueue.delete(op.id);
       processed++;
     } catch (e) {
-      await db.syncQueue.update(op.id, {
-        retries: (op.retries || 0) + 1,
-      });
+      const newRetries = (op.retries || 0) + 1;
+      if (newRetries >= 5) {
+        console.warn(`Giving up on ${op.table}:${op.recordId} after 5 retries`);
+        await db.syncQueue.delete(op.id);
+        failed++;
+      } else {
+        await db.syncQueue.update(op.id, { retries: newRetries });
+      }
     }
   }
 
-  // Clean up old completed operations
   const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
   await db.syncQueue.where("createdAt").below(weekAgo).delete();
 
-  return { processed };
+  return { processed, failed };
 }
 
 // ---------- FULL BIDIRECTIONAL SYNC ----------
@@ -454,10 +455,9 @@ export async function fullSync() {
 
   try {
     const lastSync = parseInt(localStorage.getItem("rozy-pos-last-sync") || "0");
-
     const results = { pushed: 0, pulled: 0, updated: 0 };
 
-    // Step 1: Process pending queue (retry failed ops)
+    // Step 1: Process pending queue
     await processQueue();
 
     // Step 2: Pull changes from cloud
@@ -471,14 +471,12 @@ export async function fullSync() {
       }
     }
 
-    // Step 3: Push local changes (only records newer than lastSync)
-    // For simplicity, push recent records (last 7 days) on first sync
+    // Step 3: Push local changes (first sync only)
     if (lastSync === 0) {
       for (const table of SYNC_TABLES) {
         try {
           const localRecords = await db.table(table.name).toArray();
           if (localRecords.length > 0) {
-            // Push in chunks of 100
             for (let i = 0; i < localRecords.length; i += 100) {
               const chunk = localRecords.slice(i, i + 100);
               await pushTable(table.name, chunk);
@@ -491,26 +489,22 @@ export async function fullSync() {
       }
     }
 
-    // Record sync time
     localStorage.setItem("rozy-pos-last-sync", String(Date.now()));
-
     return results;
   } finally {
     syncInProgress = false;
   }
 }
 
-// ---------- AUTO SYNC SCHEDULER ----------
+// ---------- AUTO SYNC ----------
 let autoSyncTimer = null;
 
 export function startAutoSync(intervalMs = 5 * 60 * 1000) {
   if (autoSyncTimer) clearInterval(autoSyncTimer);
   if (!isSyncConfigured()) return;
 
-  // Sync on start (after a delay)
   setTimeout(() => fullSync().catch(() => {}), 5000);
 
-  // Periodic sync
   autoSyncTimer = setInterval(() => {
     if (isOnline()) {
       fullSync().catch(() => {});
@@ -525,11 +519,10 @@ export function stopAutoSync() {
   }
 }
 
-// ---------- ONLINE/OFFLINE LISTENERS ----------
+// ---------- NETWORK LISTENERS ----------
 export function setupNetworkListeners(onOnline, onOffline) {
   window.addEventListener("online", () => {
     if (onOnline) onOnline();
-    // Auto-sync when back online
     setTimeout(() => fullSync().catch(() => {}), 2000);
   });
 
