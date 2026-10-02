@@ -9,7 +9,7 @@ import CartPanel from "../components/billing/CartPanel";
 import WeightModal from "../components/billing/WeightModal";
 import PaymentModal from "../components/billing/PaymentModal";
 import ReceiptModal from "../components/billing/ReceiptModal";
-import { Search, PauseCircle, PlayCircle, TrendingUp } from "lucide-react";
+import { Search, PauseCircle, PlayCircle, TrendingUp, X } from "lucide-react";
 import { useShop } from "../stores/shopStore";
 import { showToast } from "../components/ui/Toast";
 import { db } from "../lib/db";
@@ -35,6 +35,7 @@ export default function Billing() {
   const [showHeld, setShowHeld] = useState(false);
   const [stats, setStats] = useState({ total: 0, count: 0, cash: 0, upi: 0, card: 0 });
   const searchRef = useRef(null);
+const [cartOpen, setCartOpen] = useState(false);
 
   useEffect(() => {
     loadProducts(currentShopId);
@@ -254,7 +255,7 @@ export default function Billing() {
   }, [cart.items.length]);
 
   return (
-    <div className="h-full flex flex-col lg:flex-row gap-3 p-2 sm:p-3 lg:p-4 overflow-hidden">
+        <div className="h-full flex flex-col lg:flex-row gap-3 p-2 sm:p-3 lg:p-4 overflow-hidden pb-20 lg:pb-4">
       {/* Left: products */}
       <div className="flex-1 flex flex-col gap-3 min-h-0">
                 {/* Stats bar */}
@@ -330,10 +331,101 @@ export default function Billing() {
         </div>
       </div>
 
-                  {/* Right: cart */}
-      <div className="w-full lg:w-[380px] flex-shrink-0 lg:h-full h-auto relative z-20">
-        <CartPanel onCheckout={handleCheckout} onHold={handleHold} />
-      </div>
+                  {/* Right: cart — desktop panel / mobile bottom sheet */}
+      <>
+        {/* Desktop: always visible */}
+        <div className="hidden lg:block lg:w-[380px] flex-shrink-0 lg:h-full">
+          <CartPanel onCheckout={handleCheckout} onHold={handleHold} />
+        </div>
+
+        {/* Mobile: bottom sheet */}
+        <div className="lg:hidden fixed inset-x-0 bottom-0 z-30">
+          {/* Backdrop when open */}
+          {cartOpen && (
+            <div
+              className="fixed inset-0 bg-black/40 z-[-1]"
+              onClick={() => setCartOpen(false)}
+            />
+          )}
+
+          {/* Sheet */}
+          <div
+            className={`bg-surface rounded-t-2xl2 shadow-warmH transition-all duration-300 ${
+              cartOpen ? "h-[80vh]" : "h-16"
+            }`}
+            style={{
+              borderTop: "2px solid #B8935A",
+            }}
+          >
+            {/* Collapsed bar */}
+            {!cartOpen && (
+              <button
+                onClick={() => setCartOpen(true)}
+                className="w-full h-16 flex items-center justify-between px-4"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <span className="text-2xl">🛒</span>
+                    {cart.items.length > 0 && (
+                      <span className="absolute -top-1 -right-1 bg-danger text-white text-[10px]
+                                       font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                        {cart.items.length}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-left">
+                    <div className="font-semibold text-sm text-primary">
+                      {cart.items.length === 0
+                        ? "Cart is empty"
+                        : `${cart.items.length} item${cart.items.length > 1 ? "s" : ""}`}
+                    </div>
+                    <div className="text-xs text-ink-muted">
+                      ₹{cart.total().toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {cart.items.length > 0 && (
+                    <span className="font-mono font-bold text-primary text-lg">
+                      ₹{cart.total().toFixed(2)}
+                    </span>
+                  )}
+                  <span className="text-xs text-ink-muted">
+                    Tap to {cart.items.length === 0 ? "view" : "checkout"}
+                  </span>
+                </div>
+              </button>
+            )}
+
+            {/* Expanded: full cart */}
+            {cartOpen && (
+              <div className="h-full flex flex-col relative">
+                {/* Close button */}
+                <button
+                  onClick={() => setCartOpen(false)}
+                  className="absolute top-3 right-3 z-10 p-2 rounded-full bg-bg text-ink-muted
+                             hover:bg-primary-light transition"
+                >
+                  <X size={18} />
+                </button>
+
+                <div className="flex-1 overflow-hidden">
+                  <CartPanel
+                    onCheckout={() => {
+                      setCartOpen(false);
+                      handleCheckout();
+                    }}
+                    onHold={() => {
+                      setCartOpen(false);
+                      handleHold();
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </>
 
       {/* Modals */}
       <WeightModal
