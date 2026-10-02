@@ -330,8 +330,8 @@ export default function Billing() {
         </div>
       </div>
 
-            {/* Right: cart */}
-      <div className="w-full lg:w-[380px] flex-shrink-0 lg:h-full h-auto">
+                  {/* Right: cart */}
+      <div className="w-full lg:w-[380px] flex-shrink-0 lg:h-full h-auto relative z-20">
         <CartPanel onCheckout={handleCheckout} onHold={handleHold} />
       </div>
 

@@ -10,7 +10,7 @@ export default function ProductGrid({ products, onAdd }) {
   }
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3">
       {products.map((p) => {
         const low = (p.stock || 0) <= (p.lowStock || 0);
         const imageUrl = p.imageUrl || p.imageDataUrl;
@@ -18,8 +18,9 @@ export default function ProductGrid({ products, onAdd }) {
           <button
             key={p.id}
             onClick={() => onAdd(p)}
-            className="product-tile p-3 text-left active:scale-[0.97]"
+            className="product-tile p-2 sm:p-3 text-left active:scale-[0.97] transition"
           >
+            {/* Image */}
             <div
               className="aspect-square rounded-xl mb-2 flex items-center
                           justify-center text-3xl overflow-hidden"
@@ -39,24 +40,42 @@ export default function ProductGrid({ products, onAdd }) {
                 getCategoryIcon(p.category)
               )}
             </div>
+
+            {/* Name — truncate to 2 lines max */}
             <div
-              className="font-semibold text-sm truncate"
-              style={{ color: "#3A2410" }}
+              className="font-semibold text-xs sm:text-sm leading-tight line-clamp-2"
+              style={{
+                color: "#3A2410",
+                display: "-webkit-box",
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+                minHeight: "2.4em",
+              }}
             >
               {p.name}
             </div>
-            <div className="flex items-baseline justify-between mt-1">
-              <div className="font-mono font-bold" style={{ color: "#8B1E1E" }}>
+
+            {/* Price + Unit */}
+            <div className="flex items-baseline justify-between mt-1.5">
+              <div className="font-mono font-bold text-sm" style={{ color: "#8B1E1E" }}>
                 ₹{p.price}
               </div>
-              <div className="text-xs" style={{ color: "#6B4423" }}>
+              <div className="text-[10px] sm:text-xs" style={{ color: "#6B4423" }}>
                 /{p.unit}
               </div>
             </div>
+
+            {/* Low stock warning */}
             {low && (
-              <div className="flex items-center gap-1 text-xs mt-1" style={{ color: "#E67E22" }}>
+              <div
+                className="flex items-center gap-1 text-[10px] mt-1"
+                style={{ color: "#E67E22" }}
+              >
                 <AlertTriangle size={10} />
-                <span>Low: {p.stock} {p.unit}</span>
+                <span>
+                  {p.stock} {p.unit}
+                </span>
               </div>
             )}
           </button>

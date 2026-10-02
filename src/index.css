@@ -145,3 +145,32 @@ body {
   border-color: #6B4423;
   transform: scale(1.1);
 }
+/* ============ RESPONSIVE FIXES ============ */
+
+/* Prevent horizontal overflow on mobile */
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+/* Better touch targets on tablet */
+@media (max-width: 1024px) {
+  button, [role="button"] {
+    min-height: 40px;
+  }
+}
+
+/* Billing page mobile stacking fix */
+@media (max-width: 1023px) {
+  /* When cart stacks below products, keep it visible */
+  .billing-cart-mobile {
+    max-height: 60vh;
+    min-height: 300px;
+  }
+}
+
+/* Product tile — prevent text overflow */
+.product-tile {
+  word-break: break-word;
+  overflow: hidden;
+}

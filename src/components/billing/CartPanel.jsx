@@ -24,16 +24,18 @@ export default function CartPanel({ onCheckout, onHold }) {
     setShowDiscInput(false);
   };
 
-    return (
-        <div className="h-full lg:h-full flex flex-col rounded-xl2 max-h-[70vh] lg:max-h-none overflow-hidden"
-         style={{
-           background: "#FFF8E7",
-           border: "2px solid #B8935A",
-           boxShadow: "0 4px 16px rgba(107, 68, 35, 0.15)",
-         }}>
+  return (
+    <div
+      className="h-full flex flex-col rounded-xl2 overflow-hidden"
+      style={{
+        background: "#FFF8E7",
+        border: "2px solid #B8935A",
+        boxShadow: "0 4px 16px rgba(107, 68, 35, 0.15)",
+      }}
+    >
       {/* Header */}
       <div
-        className="p-4"
+        className="p-4 flex-shrink-0"
         style={{
           borderBottom: "1px solid #B8935A",
           background: "linear-gradient(180deg, #FFF8E7 0%, #FDF3DD 100%)",
@@ -60,8 +62,8 @@ export default function CartPanel({ onCheckout, onHold }) {
         </div>
       </div>
 
-      {/* Items */}
-      <div className="flex-1 overflow-y-auto p-2">
+      {/* Items — scrollable */}
+      <div className="flex-1 overflow-y-auto p-2 min-h-0">
         {items.length === 0 ? (
           <div className="text-center py-12 text-ink-muted text-sm">
             <div className="text-4xl mb-2">🍽️</div>
@@ -73,7 +75,7 @@ export default function CartPanel({ onCheckout, onHold }) {
             {items.map((it) => (
               <div
                 key={it.cartKey}
-                className="bg-bg rounded-xl p-3 hover:bg-primary-light/40 transition"
+                className="bg-bg rounded-xl p-3"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
@@ -95,7 +97,12 @@ export default function CartPanel({ onCheckout, onHold }) {
                 <div className="flex items-center justify-between mt-2">
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={() => updateQty(it.cartKey, Math.max(0, it.qty - (it.unit === "kg" ? 0.1 : 1)))}
+                      onClick={() =>
+                        updateQty(
+                          it.cartKey,
+                          Math.max(0, it.qty - (it.unit === "kg" ? 0.1 : 1))
+                        )
+                      }
                       className="w-8 h-8 rounded-lg bg-surface border border-border hover:border-primary
                                  flex items-center justify-center text-ink transition"
                     >
@@ -105,13 +112,17 @@ export default function CartPanel({ onCheckout, onHold }) {
                       type="number"
                       step={it.unit === "kg" ? "0.01" : "1"}
                       value={it.qty}
-                      onChange={(e) => updateQty(it.cartKey, parseFloat(e.target.value) || 0)}
+                      onChange={(e) =>
+                        updateQty(it.cartKey, parseFloat(e.target.value) || 0)
+                      }
                       className="w-16 text-center font-mono font-semibold text-sm
                                  border border-border rounded-lg py-1.5
                                  focus:outline-none focus:border-primary"
                     />
                     <button
-                      onClick={() => updateQty(it.cartKey, it.qty + (it.unit === "kg" ? 0.1 : 1))}
+                      onClick={() =>
+                        updateQty(it.cartKey, it.qty + (it.unit === "kg" ? 0.1 : 1))
+                      }
                       className="w-8 h-8 rounded-lg bg-surface border border-border hover:border-primary
                                  flex items-center justify-center text-ink transition"
                     >
@@ -128,9 +139,12 @@ export default function CartPanel({ onCheckout, onHold }) {
         )}
       </div>
 
-      {/* Summary */}
+      {/* Summary + Actions — fixed at bottom */}
       {items.length > 0 && (
-        <div className="border-t border-border p-4 space-y-3">
+        <div
+          className="flex-shrink-0 p-4 space-y-3"
+          style={{ borderTop: "1px solid #B8935A" }}
+        >
           <div className="flex justify-between text-sm">
             <span className="text-ink-muted">{t("subtotal")}</span>
             <span className="font-mono font-semibold">₹{sub.toFixed(2)}</span>
@@ -140,13 +154,17 @@ export default function CartPanel({ onCheckout, onHold }) {
             <span className="text-ink-muted flex items-center gap-1">
               {t("discount")}
               <button
-                onClick={() => {
-                  setDiscountType(discountType === "amount" ? "percent" : "amount");
-                }}
+                onClick={() =>
+                  setDiscountType(discountType === "amount" ? "percent" : "amount")
+                }
                 className="p-0.5 hover:bg-primary-light rounded"
                 title="Toggle ₹ / %"
               >
-                {discountType === "amount" ? <IndianRupee size={12} /> : <Percent size={12} />}
+                {discountType === "amount" ? (
+                  <IndianRupee size={12} />
+                ) : (
+                  <Percent size={12} />
+                )}
               </button>
             </span>
             {showDiscInput ? (
@@ -172,9 +190,7 @@ export default function CartPanel({ onCheckout, onHold }) {
                 onClick={() => setShowDiscInput(true)}
                 className="font-mono font-semibold text-accent hover:underline"
               >
-                {disc > 0
-                  ? `- ₹${disc.toFixed(2)}`
-                  : "+ Add"}
+                {disc > 0 ? `- ₹${disc.toFixed(2)}` : "+ Add"}
               </button>
             )}
           </div>
@@ -190,17 +206,18 @@ export default function CartPanel({ onCheckout, onHold }) {
         </div>
       )}
 
-      {/* Actions */}
-      <div className="p-4 border-t border-border space-y-2">
-        <div className="flex gap-2">
-          <button
-            onClick={onHold}
-            disabled={items.length === 0}
-            className="btn-outline flex-1 disabled:opacity-40"
-          >
-            ⏸ {t("hold_bill")}
-          </button>
-        </div>
+      {/* Action buttons */}
+      <div
+        className="flex-shrink-0 p-4 space-y-2"
+        style={{ borderTop: "1px solid #B8935A" }}
+      >
+        <button
+          onClick={onHold}
+          disabled={items.length === 0}
+          className="btn-outline w-full disabled:opacity-40"
+        >
+          ⏸ {t("hold_bill")}
+        </button>
         <button
           onClick={onCheckout}
           disabled={items.length === 0}
@@ -212,5 +229,3 @@ export default function CartPanel({ onCheckout, onHold }) {
     </div>
   );
 }
-
-function setDiscountType() {} // helper placeholder (handled in store)
