@@ -4,10 +4,11 @@ import {
   createBackup, downloadBackup, restoreBackup, pickBackupFile,
   getBackupStats, getLastBackupDate, setLastBackupDate,
 } from "../lib/backup";
+import { fullReset, verifyReset } from "../lib/reset";
 import { canAccessSettings } from "../lib/permissions";
 import {
   Download, Upload, Database, Check, AlertTriangle,
-  RefreshCw, FileText, Clock,
+  RefreshCw, FileText, Trash2, Shield, X,
 } from "lucide-react";
 
 export default function Backup() {
@@ -16,6 +17,10 @@ export default function Backup() {
   const [busy, setBusy] = useState(false);
   const [lastBackup, setLastBackup] = useState(getLastBackupDate());
   const [restoreInfo, setRestoreInfo] = useState(null);
+  const [showReset, setShowReset] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState("");
+  const [resetProgress, setResetProgress] = useState(null);
+  const [resetDone, setResetDone] = useState(false);
 
   useEffect(() => {
     loadStats();
@@ -46,7 +51,7 @@ export default function Backup() {
         `File: ${filename}\n` +
         `Tables: ${Object.keys(backup.counts).length}\n` +
         `Total records: ${Object.values(backup.counts).reduce((a, b) => a + b, 0)}\n\n` +
-        `Save this file somewhere safe (Google Drive, USB, WhatsApp).`
+        `Save this file somewhere safe.`
       );
     } catch (e) {
       alert("Backup failed: " + e.message);
@@ -58,7 +63,6 @@ export default function Backup() {
     if (!confirm(
       "⚠️ RESTORE WARNING ⚠️\n\n" +
       "This will REPLACE all current data with the contents of the backup file.\n\n" +
-      "Current data will be lost!\n\n" +
       "Recommendation: Download a backup first.\n\n" +
       "Continue?"
     )) return;
@@ -82,8 +86,7 @@ export default function Backup() {
     if (!restoreInfo?.backup) return;
     if (!confirm(
       `FINAL CONFIRMATION\n\n` +
-      `Restoring from: ${restoreInfo.filename}\n` +
-      `Backup date: ${new Date(restoreInfo.createdAt).toLocaleString()}\n\n` +
+      `Restoring from: ${restoreInfo.filename}\n\n` +
       `All current data will be replaced. This cannot be undone.\n\n` +
       `Proceed?`
     )) return;
@@ -99,6 +102,39 @@ export default function Backup() {
       alert("Restore failed: " + e.message);
       setBusy(false);
     }
+  };
+
+  const handleFullReset = async () => {
+    if (resetConfirm !== "RESET") {
+      alert("Please type RESET to confirm");
+      return;
+    }
+
+    setBusy(true);
+    setResetProgress([]);
+
+    try {
+      await fullReset((msg) => {
+        setResetProgress((prev) => [...prev, msg]);
+      });
+
+      const verify = await verifyReset();
+
+      setResetProgress((prev) => [
+        ...prev,
+        `Total remaining: ${verify.totalRecords} records`,
+        "Reset complete!",
+      ]);
+      setResetDone(true);
+    } catch (e) {
+      setResetProgress((prev) => [...prev, `ERROR: ${e.message}`]);
+    }
+    setBusy(false);
+  };
+
+  const finishReset = () => {
+    alert("✅ Reset complete. The app will reload now with a fresh database.");
+    location.reload();
   };
 
   const daysSinceBackup = lastBackup
@@ -163,7 +199,7 @@ export default function Backup() {
           <h2 className="font-semibold text-ink mb-4 flex items-center gap-2">
             <Database size={16} className="text-primary" /> Current Data
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="bg-bg rounded-xl p-3">
               <div className="text-xs text-ink-muted uppercase">Sales</div>
               <div className="font-mono text-lg font-bold text-primary">
@@ -192,25 +228,20 @@ export default function Backup() {
         </div>
       )}
 
-      {/* Actions */}
-      <div className="grid md:grid-cols-2 gap-4">
-        {/* Backup */}
+      {/* Backup + Restore */}
+      <div className="grid md:grid-cols-2 gap-4 mb-5">
         <div className="card p-5">
           <div className="w-12 h-12 rounded-xl bg-success/10 text-success flex items-center justify-center mb-3">
             <Download size={22} />
           </div>
           <h3 className="font-serif text-lg font-semibold mb-1">Download Backup</h3>
           <p className="text-xs text-ink-muted mb-4">
-            Saves a complete copy of your database (sales, customers, orders, everything) as a JSON file.
+            Saves everything as a JSON file.
           </p>
-          <button
-            onClick={handleBackup}
-            disabled={busy}
-            className="btn-primary w-full"
-          >
+          <button onClick={handleBackup} disabled={busy} className="btn-primary w-full">
             {busy ? (
               <>
-                <RefreshCw size={16} className="animate-spin" /> Creating backup...
+                <RefreshCw size={16} className="animate-spin" /> Creating...
               </>
             ) : (
               <>
@@ -218,36 +249,25 @@ export default function Backup() {
               </>
             )}
           </button>
-          <div className="text-xs text-ink-muted mt-3 text-center">
-            💡 Save to Google Drive, USB, or email to yourself
-          </div>
         </div>
 
-        {/* Restore */}
         <div className="card p-5">
           <div className="w-12 h-12 rounded-xl bg-warning/10 text-warning flex items-center justify-center mb-3">
             <Upload size={22} />
           </div>
           <h3 className="font-serif text-lg font-semibold mb-1">Restore from Backup</h3>
           <p className="text-xs text-ink-muted mb-4">
-            Restores your database from a previously saved backup file. Use on new devices or after a reset.
+            Restore database from a backup file.
           </p>
-          <button
-            onClick={handleRestoreClick}
-            disabled={busy}
-            className="btn-outline w-full"
-          >
+          <button onClick={handleRestoreClick} disabled={busy} className="btn-outline w-full">
             <Upload size={16} /> Select Backup File
           </button>
-          <div className="text-xs text-warning mt-3 text-center">
-            ⚠️ This will REPLACE all current data
-          </div>
         </div>
       </div>
 
       {/* Restore info panel */}
       {restoreInfo && (
-        <div className="card p-5 mt-5 border-warning">
+        <div className="card p-5 mb-5 border-warning">
           <h3 className="font-semibold text-warning mb-3 flex items-center gap-2">
             <AlertTriangle size={16} /> Confirm Restore
           </h3>
@@ -260,50 +280,123 @@ export default function Backup() {
               <span className="text-ink-muted">Backup date:</span>
               <span>{new Date(restoreInfo.createdAt).toLocaleString()}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-ink-muted">Total records:</span>
-              <span className="font-mono font-semibold">
-                {Object.values(restoreInfo.counts || {}).reduce((a, b) => a + b, 0)}
-              </span>
-            </div>
           </div>
           <div className="flex gap-2">
             <button onClick={() => setRestoreInfo(null)} className="btn-outline flex-1">
               Cancel
             </button>
-            <button
-              onClick={confirmRestore}
-              disabled={busy}
-              className="btn-primary flex-1"
-              style={{ background: "linear-gradient(180deg, #E67E22 0%, #C0392B 100%)" }}
-            >
+            <button onClick={confirmRestore} disabled={busy} className="btn-primary flex-1">
               {busy ? "Restoring..." : "Confirm Restore"}
             </button>
           </div>
         </div>
       )}
 
-      {/* Info box */}
+      {/* ============ DANGER ZONE ============ */}
+      <div className="card p-5 mt-6" style={{ borderColor: "#C0392B" }}>
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-10 h-10 rounded-xl bg-danger/10 text-danger flex items-center justify-center flex-shrink-0">
+            <Trash2 size={20} />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-serif text-lg font-semibold text-danger">
+              Danger Zone — Reset All Data
+            </h3>
+            <p className="text-xs text-ink-muted mt-1">
+              Permanently deletes ALL products, sales, customers, orders, expenses, and other data.
+              Keeps only shop settings and PIN.
+            </p>
+          </div>
+        </div>
+
+        {!showReset ? (
+          <button
+            onClick={() => setShowReset(true)}
+            className="btn-outline text-danger hover:bg-danger hover:text-white"
+            style={{ borderColor: "#C0392B" }}
+          >
+            <Trash2 size={16} /> Start Reset Process
+          </button>
+        ) : (
+          <div className="bg-danger/5 border border-danger/30 rounded-xl p-4">
+            <div className="flex items-start gap-2 mb-3">
+              <AlertTriangle size={16} className="text-danger flex-shrink-0 mt-0.5" />
+              <div className="text-xs text-ink">
+                <b>This will permanently delete everything.</b> You should download a backup first.
+              </div>
+            </div>
+
+            <label className="label text-danger">
+              Type <b>RESET</b> to confirm:
+            </label>
+            <input
+              type="text"
+              className="input font-mono"
+              placeholder="Type RESET"
+              value={resetConfirm}
+              onChange={(e) => setResetConfirm(e.target.value.toUpperCase())}
+              disabled={busy || resetDone}
+              autoFocus
+            />
+
+            {resetProgress && (
+              <div className="mt-3 bg-black/5 rounded-lg p-3 max-h-40 overflow-y-auto font-mono text-[10px]">
+                {resetProgress.map((line, i) => (
+                  <div key={i} className="text-ink-muted">{line}</div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-2 mt-4">
+              {!resetDone ? (
+                <>
+                  <button
+                    onClick={() => {
+                      setShowReset(false);
+                      setResetConfirm("");
+                      setResetProgress(null);
+                    }}
+                    disabled={busy}
+                    className="btn-outline flex-1"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleFullReset}
+                    disabled={busy || resetConfirm !== "RESET"}
+                    className="btn-primary flex-1 bg-danger"
+                    style={{ background: "linear-gradient(180deg, #C0392B 0%, #8B1E1E 100%)" }}
+                  >
+                    {busy ? "Resetting..." : "Delete Everything"}
+                  </button>
+                </>
+              ) : (
+                <button onClick={finishReset} className="btn-primary flex-1">
+                  <Check size={16} /> Done — Reload App
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Info */}
       <div className="card p-5 mt-5">
         <h3 className="font-semibold text-ink mb-3 flex items-center gap-2">
-          <FileText size={16} className="text-primary" /> How It Works
+          <FileText size={16} className="text-primary" /> Info
         </h3>
         <div className="space-y-2 text-sm text-ink-muted">
           <div className="flex gap-2">
             <Check size={14} className="text-success mt-0.5 flex-shrink-0" />
-            <span><b>Backup</b> downloads a JSON file with everything — sales, customers, orders, stock, all.</span>
+            <span>Backup downloads ALL data as a JSON file — works offline.</span>
           </div>
           <div className="flex gap-2">
             <Check size={14} className="text-success mt-0.5 flex-shrink-0" />
-            <span><b>Works offline</b> — no internet needed. Save to USB, Google Drive, or WhatsApp to yourself.</span>
-          </div>
-          <div className="flex gap-2">
-            <Check size={14} className="text-success mt-0.5 flex-shrink-0" />
-            <span><b>Restore</b> on any device — new tablet, after reset, or after data loss.</span>
+            <span>Restore brings back data on any device (new tablet, after reset).</span>
           </div>
           <div className="flex gap-2">
             <AlertTriangle size={14} className="text-warning mt-0.5 flex-shrink-0" />
-            <span><b>Do weekly</b> — set a reminder. Takes 30 seconds.</span>
+            <span>Reset is permanent. Always download a backup first.</span>
           </div>
         </div>
       </div>
