@@ -87,7 +87,7 @@ export default function AppShell() {
             overflowY: "hidden",
           }}
         >
-                <div className="p-4" style={{ borderBottom: "1px solid rgba(107, 68, 35, 0.25)" }}>
+                        <div className="p-4 flex-shrink-0" style={{ borderBottom: "1px solid rgba(107, 68, 35, 0.25)" }}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl2 flex items-center justify-center text-xl"
                  style={{
@@ -152,7 +152,7 @@ export default function AppShell() {
           })}
         </nav>
 
-                <div className="p-3" style={{ borderTop: "1px solid rgba(107, 68, 35, 0.25)" }}>
+        <div className="p-3 flex-shrink-0" style={{ borderTop: "1px solid rgba(107, 68, 35, 0.25)" }}>
           <div className="flex items-center gap-2 mb-2">
             <div className="w-9 h-9 rounded-full bg-accent-light text-accent font-bold
                             flex items-center justify-center text-sm">
