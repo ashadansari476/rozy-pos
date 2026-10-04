@@ -57,12 +57,51 @@ export default function SyncSettings() {
       setSyncResult(result);
       alert(
         `✅ Sync complete!\n\n` +
-        `Products pulled: ${result.products.pulled}\n` +
-        `Products updated: ${result.products.updated}\n` +
-        `Products pushed: (all local)`
+        `Pushed: ${result.pushed || 0} records\n` +
+        `Pulled: ${result.pulled || 0} records\n` +
+        `Updated: ${result.updated || 0} records`
       );
     } catch (e) {
       alert("Sync failed: " + e.message);
+    }
+    setSyncing(false);
+  };
+
+  const handleForceResync = async () => {
+    if (!confirm(
+      "⚠️ FORCE FULL RESYNC\n\n" +
+      "This will:\n" +
+      "1. Clear the sync timestamp\n" +
+      "2. Clear failed sync queue\n" +
+      "3. Push ALL local records to cloud\n" +
+      "4. Pull all cloud records\n\n" +
+      "Use when devices are out of sync.\n\n" +
+      "Continue?"
+    )) return;
+
+    setSyncing(true);
+    try {
+      const { db } = await import("../lib/db");
+      const { fullSync: fullSyncFn } = await import("../lib/syncEngine");
+
+      // Clear failed queue
+      await db.syncQueue.clear();
+
+      // Reset last sync timestamp to force full push
+      localStorage.removeItem("rozy-pos-last-sync");
+
+      // Force full sync
+      const result = await fullSyncFn();
+
+      alert(
+        `✅ Force resync complete!\n\n` +
+        `Pushed: ${result.pushed || 0}\n` +
+        `Pulled: ${result.pulled || 0}\n` +
+        `Updated: ${result.updated || 0}`
+      );
+      await refreshStatus();
+    } catch (e) {
+      alert("Force resync failed: " + e.message);
     }
     setSyncing(false);
   };
@@ -94,7 +133,7 @@ export default function SyncSettings() {
             Cloud Sync
           </h1>
           <p className="text-xs text-ink-muted mt-0.5">
-            Sync products between your shops via Supabase
+            Sync data between devices via Supabase
           </p>
         </div>
       </div>
@@ -143,7 +182,7 @@ export default function SyncSettings() {
               placeholder="https://xxxxx.supabase.co"
             />
             <div className="text-xs text-ink-muted mt-1">
-              Find in Supabase → Project Settings → Data API
+              Just the base URL — no /rest/v1 at the end
             </div>
           </div>
 
@@ -156,9 +195,6 @@ export default function SyncSettings() {
               placeholder="sb_publishable_..."
               rows="3"
             />
-            <div className="text-xs text-ink-muted mt-1">
-              Find in Supabase → Project Settings → API Keys → Publishable key
-            </div>
           </div>
         </div>
 
@@ -177,28 +213,41 @@ export default function SyncSettings() {
         </div>
       </div>
 
-      {/* Sync Now */}
+      {/* Sync Now + Force Resync */}
       {status?.connected && (
         <div className="card p-5 mb-5">
-          <h2 className="font-semibold text-ink mb-2">Manual Sync</h2>
+          <h2 className="font-semibold text-ink mb-2">Sync</h2>
           <p className="text-xs text-ink-muted mb-4">
-            Push all local products to cloud, then pull any new products from other shops.
-            Run this after adding many products at once.
+            <b>Sync Now:</b> Standard bidirectional sync.<br />
+            <b>Force Resync:</b> Push ALL local data + pull all cloud data. Use if devices show different numbers.
           </p>
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            className="btn-primary"
-          >
-            <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
-            {syncing ? "Syncing..." : "Sync Now"}
-          </button>
+
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              className="btn-primary"
+            >
+              <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
+              {syncing ? "Syncing..." : "Sync Now"}
+            </button>
+
+            <button
+              onClick={handleForceResync}
+              disabled={syncing}
+              className="btn-outline"
+              style={{ borderColor: "#E67E22", color: "#E67E22" }}
+            >
+              <RefreshCw size={14} />
+              Force Full Resync
+            </button>
+          </div>
 
           {syncResult && (
             <div className="bg-success/10 rounded-xl p-3 mt-4 text-sm">
               <div className="font-semibold text-success mb-1">Last sync result:</div>
               <div className="text-xs text-ink">
-                Pulled: {syncResult.products.pulled} new · {syncResult.products.updated} updated
+                Pushed: {syncResult.pushed || 0} · Pulled: {syncResult.pulled || 0} · Updated: {syncResult.updated || 0}
               </div>
             </div>
           )}
@@ -211,15 +260,15 @@ export default function SyncSettings() {
         <div className="space-y-2 text-sm text-ink-muted">
           <div className="flex gap-2">
             <Check size={14} className="text-success mt-0.5 flex-shrink-0" />
-            <span><b>Products & Categories</b> sync both ways — added once, appears everywhere</span>
+            <span><b>Products & Categories</b> sync both ways between devices</span>
+          </div>
+          <div className="flex gap-2">
+            <Check size={14} className="text-success mt-0.5 flex-shrink-0" />
+            <span><b>Sales, Customers, Orders</b> sync both ways</span>
           </div>
           <div className="flex gap-2">
             <X size={14} className="text-danger mt-0.5 flex-shrink-0" />
-            <span><b>Stock</b> stays separate per shop — Rozy's count is Rozy's own</span>
-          </div>
-          <div className="flex gap-2">
-            <X size={14} className="text-danger mt-0.5 flex-shrink-0" />
-            <span><b>Sales, customers, orders</b> are per-shop and stay local</span>
+            <span><b>Stock</b> is per-shop — Rozy's count is Rozy's own</span>
           </div>
         </div>
       </div>
