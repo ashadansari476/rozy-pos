@@ -25,7 +25,7 @@ export const SYNC_TABLES = [
   { name: "purchases",       supabaseTable: "purchases",       key: "id" },
   { name: "purchaseItems",   supabaseTable: "purchase_items",  key: "id" },
   { name: "shopStock",       supabaseTable: "shop_stock",      key: "id" },
-  { name: "users",           supabaseTable: "users",           key: "id" },
+  { name: "users",           supabaseTable: "pos_users",           key: "id" },
   { name: "batches",         supabaseTable: "batches",         key: "id" },
   { name: "payments",        supabaseTable: "payments",        key: "id" },
 ];
