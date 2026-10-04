@@ -288,6 +288,10 @@ export async function pushTable(tableName, records) {
   const payload = records.map((r) => {
     const cloud = toCloud(r, tableName);
     delete cloud.syncVersion;
+    // Clean undefined values — prevents Supabase rejections
+    Object.keys(cloud).forEach((k) => {
+      if (cloud[k] === undefined) delete cloud[k];
+    });
     return cloud;
   });
 
@@ -299,28 +303,13 @@ export async function pushTable(tableName, records) {
   return { pushed: records.length };
 }
 
-// ---------- PULL: Cloud → Local ----------
 export async function pullTable(tableName, sinceTs) {
   const config = SYNC_TABLES.find((t) => t.name === tableName);
   if (!config) return { pulled: 0, updated: 0 };
 
-  const noUpdatedAtTables = [
-    "auditLog", "stockMovements", "wastage",
-    "saleItems", "orderItems", "purchaseItems", "payments",
-  ];
-
-  let query = `/${config.supabaseTable}?select=*&limit=500&order=id.desc`;
-
-  const DAYS_BACK = 7;
-  const recentSyncThreshold = Date.now() - DAYS_BACK * 24 * 60 * 60 * 1000;
-
-  if (
-    sinceTs &&
-    sinceTs > recentSyncThreshold &&
-    !noUpdatedAtTables.includes(tableName)
-  ) {
-    query += `&updated_at=gt.${new Date(sinceTs).toISOString()}`;
-  }
+  // Always pull latest records (simpler and more reliable)
+  // Sorted newest first, limit 500 — for typical shop usage this covers everything
+  const query = `/${config.supabaseTable}?select=*&limit=500&order=id.desc`;
 
   const remote = await sbFetch(query);
   if (!Array.isArray(remote)) return { pulled: 0, updated: 0 };
@@ -333,13 +322,17 @@ export async function pullTable(tableName, sinceTs) {
     const existing = await db.table(tableName).get(local.id);
 
     if (!existing) {
+      // New record from cloud
       await db.table(tableName).put(local);
       pulled++;
     } else {
+      // Existing — overwrite if remote is newer
       const localTs = existing.updatedAt || existing.createdAt || 0;
       const remoteTs = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
-      if (remoteTs > localTs) {
-        await db.table(tableName).put({ ...local, ...existing, ...local });
+
+      // If remote has updated_at, use it; otherwise just merge (remote wins)
+      if (!localTs || remoteTs > localTs || !existing.updatedAt) {
+        await db.table(tableName).put({ ...existing, ...local });
         updated++;
       }
     }
