@@ -34,7 +34,15 @@ export default function OfflineBanner() {
 
     run();
     const interval = setInterval(run, 30000); // every 30 seconds
-    return () => clearInterval(interval);
+
+    // Also refresh when a sync completes
+    const syncHandler = () => run();
+    window.addEventListener("sync-complete", syncHandler);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("sync-complete", syncHandler);
+    };
   }, [online]);
 
   // Nothing to show if everything is fine

@@ -29,6 +29,9 @@ export const useSync = create((set, get) => ({
         error: null,
       });
 
+      // Notify other components to refresh
+      window.dispatchEvent(new CustomEvent("sync-complete"));
+
       // Reset to idle after 3 seconds
       setTimeout(() => {
         if (get().status === "success") set({ status: "idle" });
@@ -37,6 +40,7 @@ export const useSync = create((set, get) => ({
       return result;
     } catch (e) {
       set({ status: "error", error: e.message });
+      window.dispatchEvent(new CustomEvent("sync-complete"));
       setTimeout(() => {
         if (get().status === "error") set({ status: "idle", error: null });
       }, 5000);
