@@ -25,13 +25,25 @@ export const SYNC_TABLES = [
   { name: "purchases",       supabaseTable: "purchases",       key: "id" },
   { name: "purchaseItems",   supabaseTable: "purchase_items",  key: "id" },
   { name: "shopStock",       supabaseTable: "shop_stock",      key: "id" },
-  { name: "users",           supabaseTable: "pos_users",           key: "id" },
+  { name: "users",           supabaseTable: "pos_users",       key: "id" },
   { name: "batches",         supabaseTable: "batches",         key: "id" },
   { name: "payments",        supabaseTable: "payments",        key: "id" },
 ];
 
 // ---------- Field name converters ----------
 const FIELD_MAP = {
+  products: {
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+    syncVersion: "sync_version",
+    lowStock: "low_stock",
+  },
+  categories: {
+    sortOrder: "sort_order",
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+    syncVersion: "sync_version",
+  },
   sales: {
     shopId: "shop_id",
     billNo: "bill_no",
@@ -303,12 +315,11 @@ export async function pushTable(tableName, records) {
   return { pushed: records.length };
 }
 
+// ---------- PULL: Cloud → Local ----------
 export async function pullTable(tableName, sinceTs) {
   const config = SYNC_TABLES.find((t) => t.name === tableName);
   if (!config) return { pulled: 0, updated: 0 };
 
-  // Always pull latest records (simpler and more reliable)
-  // Sorted newest first, limit 500 — for typical shop usage this covers everything
   const query = `/${config.supabaseTable}?select=*&limit=500&order=id.desc`;
 
   const remote = await sbFetch(query);
@@ -322,15 +333,12 @@ export async function pullTable(tableName, sinceTs) {
     const existing = await db.table(tableName).get(local.id);
 
     if (!existing) {
-      // New record from cloud
       await db.table(tableName).put(local);
       pulled++;
     } else {
-      // Existing — overwrite if remote is newer
       const localTs = existing.updatedAt || existing.createdAt || 0;
       const remoteTs = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
 
-      // If remote has updated_at, use it; otherwise just merge (remote wins)
       if (!localTs || remoteTs > localTs || !existing.updatedAt) {
         await db.table(tableName).put({ ...existing, ...local });
         updated++;
@@ -464,21 +472,24 @@ export async function fullSync() {
       }
     }
 
-    // Step 3: Push local changes (first sync only)
-    if (lastSync === 0) {
-      for (const table of SYNC_TABLES) {
-        try {
-          const localRecords = await db.table(table.name).toArray();
-          if (localRecords.length > 0) {
-            for (let i = 0; i < localRecords.length; i += 100) {
-              const chunk = localRecords.slice(i, i + 100);
+    // Step 3: Push ALL local records (not just on first sync)
+    // This ensures products/categories/etc. always flow to cloud
+    for (const table of SYNC_TABLES) {
+      try {
+        const localRecords = await db.table(table.name).toArray();
+        if (localRecords.length > 0) {
+          for (let i = 0; i < localRecords.length; i += 100) {
+            const chunk = localRecords.slice(i, i + 100);
+            try {
               await pushTable(table.name, chunk);
               results.pushed += chunk.length;
+            } catch (e) {
+              console.warn(`Push failed for ${table.name} chunk:`, e.message);
             }
           }
-        } catch (e) {
-          console.warn(`Push failed for ${table.name}:`, e.message);
         }
+      } catch (e) {
+        console.warn(`Push failed for ${table.name}:`, e.message);
       }
     }
 
