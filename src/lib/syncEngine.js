@@ -212,8 +212,10 @@ const FIELD_MAP = {
 // Fields that should NEVER be sent to cloud (local-only)
 const LOCAL_ONLY_FIELDS = [
   "imageDataUrl",      // local base64 image fallback
+  "imageUrl",          // not synced — images stored separately in Storage
   "counter",           // old field, replaced by shopId
   "product_name",      // duplicated field in some tables
+  "customer",          // old field, use customerId/customerName
 ];
 
 function toCloud(localRecord, tableName) {
