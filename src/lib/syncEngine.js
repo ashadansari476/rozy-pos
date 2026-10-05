@@ -209,11 +209,20 @@ const FIELD_MAP = {
   },
 };
 
-// ---------- Field converters ----------
+// Fields that should NEVER be sent to cloud (local-only)
+const LOCAL_ONLY_FIELDS = [
+  "imageDataUrl",      // local base64 image fallback
+  "counter",           // old field, replaced by shopId
+  "product_name",      // duplicated field in some tables
+];
+
 function toCloud(localRecord, tableName) {
   const map = FIELD_MAP[tableName] || {};
   const out = {};
   for (const [k, v] of Object.entries(localRecord)) {
+    // Skip local-only fields
+    if (LOCAL_ONLY_FIELDS.includes(k)) continue;
+
     const cloudKey = map[k] || k;
     // Convert numeric timestamps to ISO strings
     if ((cloudKey === "updated_at" || cloudKey === "created_at") && typeof v === "number") {
