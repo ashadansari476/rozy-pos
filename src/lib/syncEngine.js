@@ -31,7 +31,7 @@ export const SYNC_TABLES = [
 
 // ---------- Field name converters ----------
 const FIELD_MAP = {
-    products: {
+  products: {
     createdAt: "created_at",
     updatedAt: "updated_at",
     syncVersion: "sync_version",
@@ -130,7 +130,7 @@ const FIELD_MAP = {
   auditLog: {
     shopId: "shop_id",
     userName: "user_name",
-    user: "user_name",          // ← ADDED: map local `user` to cloud `user_name`
+    user: "user_name",
     entityId: "entity_id",
     syncVersion: "sync_version",
     createdAt: "created_at",
@@ -140,7 +140,7 @@ const FIELD_MAP = {
     productId: "product_id",
     productName: "product_name",
     userName: "user_name",
-    user: "user_name",          // ← safety
+    user: "user_name",
     balanceAfter: "balance_after",
     syncVersion: "sync_version",
     createdAt: "created_at",
@@ -151,7 +151,7 @@ const FIELD_MAP = {
     productName: "product_name",
     costValue: "cost_value",
     userName: "user_name",
-    user: "user_name",          // ← safety
+    user: "user_name",
     syncVersion: "sync_version",
     createdAt: "created_at",
   },
@@ -208,26 +208,38 @@ const FIELD_MAP = {
   },
 };
 
-// Fields that should NEVER be sent to cloud (local-only)
+// ---------- Universal local-only fields ----------
+// These are skipped for ALL tables (never sent to cloud)
 const LOCAL_ONLY_FIELDS = [
   "imageDataUrl",      // local base64 image fallback
-  "imageUrl",          // not synced — images stored separately in Storage
+  "imageUrl",          // images stored separately in Storage
   "counter",           // old field, replaced by shopId
-  "product_name",      // duplicated field in some tables
-  "customer",          // old field, use customerId/customerName
-  "low_stock",         // belongs in shop_stock table, not products
-  "lowStock",          // same — belongs in shop_stock
-  "stock",             // stock is per-shop, lives in shop_stock
+  "product_name",      // duplicated field
+  "customer",          // old field, use customerId
 ];
 
+// ---------- Table-specific local-only fields ----------
+// These are skipped ONLY for specific tables
+const TABLE_LOCAL_ONLY = {
+  // products table: stock lives in shop_stock, not products
+  products: ["stock", "lowStock", "low_stock"],
+};
+
+// ---------- Field converters ----------
 function toCloud(localRecord, tableName) {
   const map = FIELD_MAP[tableName] || {};
   const out = {};
+  const tableLocal = TABLE_LOCAL_ONLY[tableName] || [];
+
   for (const [k, v] of Object.entries(localRecord)) {
-    // Skip local-only fields
+    // Skip universal local-only fields
     if (LOCAL_ONLY_FIELDS.includes(k)) continue;
 
+    // Skip table-specific local-only fields
+    if (tableLocal.includes(k)) continue;
+
     const cloudKey = map[k] || k;
+
     // Convert numeric timestamps to ISO strings
     if ((cloudKey === "updated_at" || cloudKey === "created_at") && typeof v === "number") {
       out[cloudKey] = new Date(v).toISOString();
@@ -304,16 +316,14 @@ export function isOnline() {
   return typeof navigator !== "undefined" && navigator.onLine;
 }
 
-// ---------- PUSH ----------
-// KEY FIX: Normalize all records in a batch to have the SAME keys
+// ---------- Batch normalization ----------
+// Ensures every record in a batch has the SAME keys
 function normalizeBatch(payloads) {
-  // Collect all keys across all records
   const allKeys = new Set();
   for (const p of payloads) {
     for (const k of Object.keys(p)) allKeys.add(k);
   }
   const keysArray = [...allKeys];
-  // For each record, fill in missing keys with null
   return payloads.map((p) => {
     const out = {};
     for (const k of keysArray) {
@@ -323,6 +333,7 @@ function normalizeBatch(payloads) {
   });
 }
 
+// ---------- PUSH ----------
 export async function pushTable(tableName, records) {
   if (!records.length) return { pushed: 0 };
 
@@ -333,14 +344,12 @@ export async function pushTable(tableName, records) {
     const cloud = toCloud(r, tableName);
     delete cloud.syncVersion;
     delete cloud.sync_version;
-    // Clean undefined/null-free
     Object.keys(cloud).forEach((k) => {
       if (cloud[k] === undefined) delete cloud[k];
     });
     return cloud;
   });
 
-  // NEW: Normalize so all records share the same keys
   const normalized = normalizeBatch(payload);
 
   await sbFetch(`/${config.supabaseTable}`, {
