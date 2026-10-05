@@ -1,4 +1,8 @@
-// Supabase sync engine — shared products catalog
+// ============================================================
+// ROZY POS — Supabase Integration (Legacy - now uses syncEngine)
+// Kept for compatibility with product add/edit hooks
+// ============================================================
+
 import { db } from "./db";
 
 const SUPABASE_URL_KEY = "rozy-pos-supabase-url";
@@ -62,9 +66,18 @@ export async function testConnection() {
   }
 }
 
-// ---------- PRODUCTS SYNC ----------
+// ---------- Helpers ----------
+function toIso(value) {
+  if (!value) return new Date().toISOString();
+  if (typeof value === "number") return new Date(value).toISOString();
+  if (typeof value === "string") {
+    const d = new Date(value);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+  return new Date().toISOString();
+}
 
-// Push all local products to Supabase
+// ---------- PRODUCTS SYNC ----------
 export async function pushProducts() {
   const products = await db.products.toArray();
   if (!products.length) return { pushed: 0 };
@@ -72,15 +85,15 @@ export async function pushProducts() {
   const payload = products.map((p) => ({
     id: p.id,
     name: p.name,
-    category: p.category,
-    unit: p.unit,
+    category: p.category || null,
+    unit: p.unit || null,
     price: p.price || 0,
     cost: p.cost || 0,
     barcode: p.barcode || "",
     variants: p.variants || [],
     active: p.active !== false,
-    created_at: p.createdAt || Date.now(),
-    updated_at: p.updatedAt || Date.now(),
+    created_at: toIso(p.createdAt),
+    updated_at: toIso(p.updatedAt),
   }));
 
   await sbFetch("/products", {
@@ -91,7 +104,6 @@ export async function pushProducts() {
   return { pushed: products.length };
 }
 
-// Pull products from Supabase (merge with local, newest wins)
 export async function pullProducts() {
   const remote = await sbFetch("/products?select=*");
   if (!remote || !Array.isArray(remote)) return { pulled: 0, updated: 0 };
@@ -101,10 +113,9 @@ export async function pullProducts() {
 
   for (const r of remote) {
     const local = await db.products.get(r.id);
-    const remoteUpdated = r.updated_at || 0;
+    const remoteUpdated = r.updated_at ? new Date(r.updated_at).getTime() : 0;
 
     if (!local) {
-      // New from cloud
       await db.products.put({
         id: r.id,
         name: r.name,
@@ -115,12 +126,11 @@ export async function pullProducts() {
         barcode: r.barcode || "",
         variants: r.variants || [],
         active: r.active !== false,
-        createdAt: r.created_at,
-        updatedAt: r.updated_at,
+        createdAt: remoteUpdated,
+        updatedAt: remoteUpdated,
       });
       pulled++;
     } else if (remoteUpdated > (local.updatedAt || 0)) {
-      // Remote is newer — update local
       await db.products.put({
         ...local,
         name: r.name,
@@ -131,7 +141,7 @@ export async function pullProducts() {
         barcode: r.barcode || "",
         variants: r.variants || [],
         active: r.active !== false,
-        updatedAt: r.updated_at,
+        updatedAt: remoteUpdated,
       });
       updated++;
     }
@@ -140,7 +150,6 @@ export async function pullProducts() {
   return { pulled, updated };
 }
 
-// Push a single product (after add/edit)
 export async function pushSingleProduct(productId) {
   if (!isSyncEnabled()) return;
   const p = await db.products.get(productId);
@@ -149,15 +158,15 @@ export async function pushSingleProduct(productId) {
   const payload = {
     id: p.id,
     name: p.name,
-    category: p.category,
-    unit: p.unit,
+    category: p.category || null,
+    unit: p.unit || null,
     price: p.price || 0,
     cost: p.cost || 0,
     barcode: p.barcode || "",
     variants: p.variants || [],
     active: p.active !== false,
-    created_at: p.createdAt || Date.now(),
-    updated_at: Date.now(),
+    created_at: toIso(p.createdAt),
+    updated_at: toIso(Date.now()),
   };
 
   try {
@@ -170,7 +179,6 @@ export async function pushSingleProduct(productId) {
   }
 }
 
-// Delete from cloud
 export async function deleteProductRemote(productId) {
   if (!isSyncEnabled()) return;
   try {
@@ -181,7 +189,6 @@ export async function deleteProductRemote(productId) {
 }
 
 // ---------- CATEGORIES SYNC ----------
-
 export async function pushCategories() {
   const categories = await db.categories.toArray();
   if (!categories.length) return;
@@ -191,6 +198,8 @@ export async function pushCategories() {
     name: c.name,
     icon: c.icon || "📦",
     sort_order: c.sortOrder || 0,
+    created_at: toIso(Date.now()),
+    updated_at: toIso(Date.now()),
   }));
 
   await sbFetch("/categories", {
@@ -222,15 +231,12 @@ export async function fullSync() {
 
   const results = { products: null, categories: null };
 
-  // Pull first (get remote changes)
   results.products = await pullProducts();
   await pullCategories();
 
-  // Then push (send local changes)
   await pushProducts();
   await pushCategories();
 
-  // Final pull to merge any missed
   await pullProducts();
 
   return results;
@@ -244,10 +250,10 @@ export function schedulePush(productId) {
   if (syncTimer) clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
     pushSingleProduct(productId);
-  }, 2000); // 2 second debounce
+  }, 2000);
 }
 
-// ---------- Status ----------
+// ---------- STATUS ----------
 export async function getSyncStatus() {
   const enabled = isSyncEnabled();
   if (!enabled) return { enabled: false };
