@@ -1,7 +1,10 @@
-import { saveSale } from "./billing";
-import { nextBillNumber } from "./billing";
 import { db } from "./db";
 import { pushRecord } from "./syncEngine";
+
+// Helper — get current shop ID
+function getCurrentShopId() {
+  return localStorage.getItem("rozy-pos-current-shop") || "rozy";
+}
 
 // ============ CUSTOMERS ============
 
@@ -14,12 +17,12 @@ export async function addCustomer({ name, phone, address, notes, birthday }) {
     notes: (notes || "").trim(),
     birthday: birthday || null,
     createdAt: now,
+    updatedAt: now,
     totalSpent: 0,
     totalOrders: 0,
     lastVisit: now,
   });
 
-  // Push to cloud
   pushRecord("customers", {
     id,
     name: name.trim(),
@@ -28,18 +31,19 @@ export async function addCustomer({ name, phone, address, notes, birthday }) {
     notes: (notes || "").trim(),
     birthday: birthday || null,
     createdAt: now,
+    updatedAt: now,
     totalSpent: 0,
     totalOrders: 0,
     lastVisit: now,
-    updatedAt: now,
   }).catch(() => {});
 
   return id;
 }
 
 export async function updateCustomer(id, data) {
-  const result = await db.customers.update(id, { ...data, updatedAt: Date.now() });
-  pushRecord("customers", { id, ...data, updatedAt: Date.now() }).catch(() => {});
+  const now = Date.now();
+  const result = await db.customers.update(id, { ...data, updatedAt: now });
+  pushRecord("customers", { id, ...data, updatedAt: now }).catch(() => {});
   return result;
 }
 
@@ -133,9 +137,11 @@ export async function createOrder({
 }) {
   const now = Date.now();
   const orderNo = `ORD-${now.toString().slice(-6)}`;
+  const shopId = getCurrentShopId();
 
   const orderId = await db.orders.add({
     orderNo,
+    shopId,
     customerId: customerId || null,
     customerName: customerName || "Walk-in",
     customerPhone: customerPhone || "",
@@ -158,12 +164,14 @@ export async function createOrder({
     channel: channel || "pos",
     source: source || "pos",
     createdAt: now,
+    createdAtTs: now,
     createdBy: user || "system",
     updatedAt: now,
   });
 
   if (advanceAmount > 0) {
     await db.payments.add({
+      shopId,
       orderId,
       ts: now,
       type: "advance",
@@ -173,17 +181,18 @@ export async function createOrder({
   }
 
   await db.auditLog.add({
+    shopId,
     ts: now,
-    user: user || "system",
+    userName: user || "system",
     action: "ORDER_CREATED",
     entity: "order",
     entityId: orderId,
     details: { orderNo, totalAmount, advanceAmount },
   });
 
-  // Push order to cloud
   pushRecord("orders", {
     id: orderId,
+    shopId,
     orderNo,
     customerId: customerId || null,
     customerName: customerName || "Walk-in",
@@ -203,7 +212,6 @@ export async function createOrder({
     updatedAt: now,
   }).catch(() => {});
 
-  // Trigger near-real-time sync
   import("../stores/syncStore").then(({ useSync }) => {
     useSync.getState().sync();
   }).catch(() => {});
@@ -217,11 +225,13 @@ export async function updateOrder(orderId, data) {
 
 export async function updateOrderStatus(orderId, status, user) {
   const now = Date.now();
+  const shopId = getCurrentShopId();
   await db.orders.update(orderId, { status, updatedAt: now });
 
   await db.auditLog.add({
+    shopId,
     ts: now,
-    user: user || "system",
+    userName: user || "system",
     action: "ORDER_STATUS_CHANGED",
     entity: "order",
     entityId: orderId,
@@ -236,6 +246,7 @@ export async function recordOrderPayment(orderId, amount, type = "balance", user
   if (!order) return;
 
   const now = Date.now();
+  const shopId = getCurrentShopId();
   const newPaid = (order.advanceAmount || 0) + amount;
 
   await db.orders.update(orderId, {
@@ -245,6 +256,7 @@ export async function recordOrderPayment(orderId, amount, type = "balance", user
   });
 
   await db.payments.add({
+    shopId,
     orderId,
     ts: now,
     type,
@@ -307,7 +319,7 @@ export async function getOrderStats() {
   };
 }
 
-// ============ COMPLETE ORDER (Auto-Bill on Delivery) ============
+// ============ COMPLETE ORDER ============
 
 export async function completeOrder({
   orderId,
@@ -321,6 +333,7 @@ export async function completeOrder({
   if (order.status === "delivered") throw new Error("Order already delivered");
 
   const now = Date.now();
+  const shopId = counter.toLowerCase();
 
   const prefix = counter === "Rozy" ? "RZ" : counter === "Warish" ? "WR" : "GN";
   const seqKey = `billSeq_${counter}`;
@@ -333,9 +346,9 @@ export async function completeOrder({
   const change = Math.max(0, totalPaid - order.totalAmount);
 
   const saleId = await db.sales.add({
+    shopId,
     billNo,
     counter,
-    shopId: counter.toLowerCase(),
     cashier: user || "system",
     ts: now,
     subtotal: order.totalAmount,
@@ -364,22 +377,24 @@ export async function completeOrder({
       saleId,
       productId: it.productId,
       name: it.productName,
-      product_name: it.productName,
       qty: it.qty,
       unit: it.unit,
       price: it.price,
       lineTotal: it.lineTotal,
     });
 
-    const product = await db.products.get(it.productId);
-    if (product) {
-      const newStock = Math.max(0, (product.stock || 0) - it.qty);
-      await db.products.update(it.productId, {
-        stock: newStock,
-        updatedAt: now,
-      });
+    // Deduct from shopStock
+    const existing = await db.shopStock
+      .where("[shopId+productId]")
+      .equals([shopId, it.productId])
+      .first();
+
+    if (existing) {
+      const newStock = Math.max(0, (existing.stock || 0) - it.qty);
+      await db.shopStock.update(existing.id, { stock: newStock });
 
       await db.stockMovements.add({
+        shopId,
         ts: now,
         productId: it.productId,
         productName: it.productName,
@@ -387,8 +402,8 @@ export async function completeOrder({
         unit: it.unit,
         reason: "sale",
         note: `Order ${order.orderNo} delivered`,
-        cost: product.cost || 0,
-        user: user || "system",
+        cost: it.cost || 0,
+        userName: user || "system",
         balanceAfter: newStock,
       });
     }
@@ -396,6 +411,7 @@ export async function completeOrder({
 
   if (paymentAmount > 0) {
     await db.payments.add({
+      shopId,
       orderId,
       ts: now,
       type: "balance",
@@ -421,20 +437,21 @@ export async function completeOrder({
         totalSpent: (cust.totalSpent || 0) + order.totalAmount,
         totalOrders: (cust.totalOrders || 0) + 1,
         lastVisit: now,
+        updatedAt: now,
       });
     }
   }
 
   await db.auditLog.add({
+    shopId,
     ts: now,
-    user: user || "system",
+    userName: user || "system",
     action: "ORDER_COMPLETED",
     entity: "order",
     entityId: orderId,
     details: { orderNo: order.orderNo, billNo, totalPaid, paymentMode },
   });
 
-  // Trigger sync
   import("../stores/syncStore").then(({ useSync }) => {
     useSync.getState().sync();
   }).catch(() => {});

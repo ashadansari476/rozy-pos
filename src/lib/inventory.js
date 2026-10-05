@@ -1,12 +1,17 @@
 import { db } from "./db";
 
+// Helper — get current shop ID
+function getCurrentShopId() {
+  return localStorage.getItem("rozy-pos-current-shop") || "rozy";
+}
+
 // ============ STOCK ADJUSTMENTS ============
 
-// Adjust stock (positive or negative) with reason
 export async function adjustStock({ productId, qty, reason, note, cost, user }) {
   const product = await db.products.get(productId);
   if (!product) throw new Error("Product not found");
 
+  const shopId = getCurrentShopId();
   const newStock = Math.max(0, (product.stock || 0) + qty);
 
   await db.products.update(productId, {
@@ -14,24 +19,26 @@ export async function adjustStock({ productId, qty, reason, note, cost, user }) 
     updatedAt: Date.now(),
   });
 
-  // Log the movement
+  // Log the movement — WITH shopId and userName
   await db.stockMovements.add({
+    shopId,
     ts: Date.now(),
     productId,
     productName: product.name,
     qty,
     unit: product.unit,
-    reason, // "restock" | "wastage" | "expired" | "damage" | "correction" | "sale"
+    reason,
     note: note || "",
     cost: cost || product.cost || 0,
-    user: user || "system",
+    userName: user || "system",
     balanceAfter: newStock,
   });
 
-  // Audit
+  // Audit — WITH shopId and userName
   await db.auditLog.add({
+    shopId,
     ts: Date.now(),
-    user: user || "system",
+    userName: user || "system",
     action: "STOCK_ADJUSTED",
     entity: "product",
     entityId: productId,
@@ -47,10 +54,10 @@ export async function recordWastage({ productId, qty, reason, note, user }) {
   const product = await db.products.get(productId);
   if (!product) throw new Error("Product not found");
 
+  const shopId = getCurrentShopId();
   const cost = product.cost || 0;
   const wastageValue = cost * qty;
 
-  // Deduct stock
   await adjustStock({
     productId,
     qty: -Math.abs(qty),
@@ -59,17 +66,18 @@ export async function recordWastage({ productId, qty, reason, note, user }) {
     user,
   });
 
-  // Dedicated wastage log
+  // Wastage log — WITH shopId and userName
   await db.wastage.add({
+    shopId,
     ts: Date.now(),
     productId,
     productName: product.name,
     qty,
     unit: product.unit,
-    reason, // "expired" | "damaged" | "stale" | "customer return" | "other"
+    reason,
     note: note || "",
     costValue: wastageValue,
-    user: user || "system",
+    userName: user || "system",
   });
 
   return wastageValue;
@@ -90,19 +98,21 @@ export async function addBatch({ productId, qty, expiryDate, cost, batchNo, user
   const product = await db.products.get(productId);
   if (!product) throw new Error("Product not found");
 
+  const shopId = getCurrentShopId();
+
   const batchId = await db.batches.add({
+    shopId,
     productId,
     productName: product.name,
     qty,
     unit: product.unit,
-    expiryDate: expiryDate || null, // timestamp
+    expiryDate: expiryDate || null,
     cost: cost || product.cost || 0,
     batchNo: batchNo || "",
     ts: Date.now(),
     active: true,
   });
 
-  // Also increment product stock
   await adjustStock({
     productId,
     qty,
@@ -148,8 +158,10 @@ export async function markBatchExpired(batchId, user) {
 // ============ SUPPLIERS ============
 
 export async function addSupplier(supplier) {
+  const shopId = getCurrentShopId();
   return await db.suppliers.add({
     ...supplier,
+    shopId,
     createdAt: Date.now(),
   });
 }
@@ -169,9 +181,11 @@ export async function getAllSuppliers() {
 // ============ PURCHASES ============
 
 export async function recordPurchase({ supplierId, supplierName, items, note, user }) {
+  const shopId = getCurrentShopId();
   const total = items.reduce((s, it) => s + it.qty * it.cost, 0);
 
   const purchaseId = await db.purchases.add({
+    shopId,
     ts: Date.now(),
     supplierId: supplierId || null,
     supplierName: supplierName || "Unknown",
@@ -185,10 +199,9 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
     })),
     total,
     note: note || "",
-    user: user || "system",
+    userName: user || "system",
   });
 
-  // Add stock for each item + create batches if expiry provided
   for (const it of items) {
     await adjustStock({
       productId: it.productId,
@@ -199,15 +212,14 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
       user,
     });
 
-    // Update product cost price to latest
     await db.products.update(it.productId, {
       cost: it.cost,
       updatedAt: Date.now(),
     });
 
-    // Create batch if expiry provided
     if (it.expiryDate) {
       await db.batches.add({
+        shopId,
         productId: it.productId,
         productName: it.productName,
         qty: it.qty,
@@ -255,8 +267,8 @@ export async function getMovements({ productId, from, to, limit = 100 }) {
 
 export async function getInventoryStats() {
   const products = await db.products.toArray();
-  let totalValue = 0;     // at cost
-  let retailValue = 0;    // at selling price
+  let totalValue = 0;
+  let retailValue = 0;
   let lowCount = 0;
   let outCount = 0;
 
@@ -310,7 +322,6 @@ export async function calculateProfit({ from, to }) {
     cost += itemCost;
   }
 
-  // Deduct wastage cost
   const wastage = await getWastage({ from, to });
   const wastageCost = wastage.reduce((s, w) => s + (w.costValue || 0), 0);
 
