@@ -31,11 +31,10 @@ export const SYNC_TABLES = [
 
 // ---------- Field name converters ----------
 const FIELD_MAP = {
-  products: {
+    products: {
     createdAt: "created_at",
     updatedAt: "updated_at",
     syncVersion: "sync_version",
-    lowStock: "low_stock",
   },
   categories: {
     sortOrder: "sort_order",
@@ -216,6 +215,9 @@ const LOCAL_ONLY_FIELDS = [
   "counter",           // old field, replaced by shopId
   "product_name",      // duplicated field in some tables
   "customer",          // old field, use customerId/customerName
+  "low_stock",         // belongs in shop_stock table, not products
+  "lowStock",          // same — belongs in shop_stock
+  "stock",             // stock is per-shop, lives in shop_stock
 ];
 
 function toCloud(localRecord, tableName) {
