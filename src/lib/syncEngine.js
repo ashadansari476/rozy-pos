@@ -373,6 +373,39 @@ export async function pullTable(tableName, sinceTs) {
   let pulled = 0;
   let updated = 0;
 
+  // SPECIAL HANDLING: Categories sync by NAME to prevent duplicates
+  if (tableName === "categories") {
+    const localCategories = await db.categories.toArray();
+    const localByName = {};
+    for (const c of localCategories) {
+      localByName[c.name.toLowerCase().trim()] = c;
+    }
+    const cloudByName = new Set();
+    for (const r of remote) {
+      cloudByName.add((r.name || "").toLowerCase().trim());
+    }
+    // Delete local categories that no longer exist in cloud
+    for (const c of localCategories) {
+      if (!cloudByName.has(c.name.toLowerCase().trim())) {
+        await db.categories.delete(c.id);
+      }
+    }
+    // Add cloud categories that don't exist locally
+    for (const r of remote) {
+      const key = (r.name || "").toLowerCase().trim();
+      if (!localByName[key]) {
+        await db.categories.add({
+          name: r.name,
+          icon: r.icon || "📦",
+          sortOrder: r.sort_order || 0,
+        });
+        pulled++;
+      }
+    }
+    return { pulled, updated };
+  }
+
+  // Default handling for all other tables
   for (const r of remote) {
     const local = toLocal(r, tableName);
     const existing = await db.table(tableName).get(local.id);
