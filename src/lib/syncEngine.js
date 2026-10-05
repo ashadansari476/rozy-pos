@@ -1,6 +1,5 @@
 // ============================================================
 // ROZY POS — Bidirectional Sync Engine
-// Syncs local IndexedDB ↔ Supabase cloud
 // ============================================================
 
 import { db } from "./db";
@@ -132,6 +131,7 @@ const FIELD_MAP = {
   auditLog: {
     shopId: "shop_id",
     userName: "user_name",
+    user: "user_name",          // ← ADDED: map local `user` to cloud `user_name`
     entityId: "entity_id",
     syncVersion: "sync_version",
     createdAt: "created_at",
@@ -141,6 +141,7 @@ const FIELD_MAP = {
     productId: "product_id",
     productName: "product_name",
     userName: "user_name",
+    user: "user_name",          // ← safety
     balanceAfter: "balance_after",
     syncVersion: "sync_version",
     createdAt: "created_at",
@@ -151,6 +152,7 @@ const FIELD_MAP = {
     productName: "product_name",
     costValue: "cost_value",
     userName: "user_name",
+    user: "user_name",          // ← safety
     syncVersion: "sync_version",
     createdAt: "created_at",
   },
@@ -213,9 +215,8 @@ function toCloud(localRecord, tableName) {
   const out = {};
   for (const [k, v] of Object.entries(localRecord)) {
     const cloudKey = map[k] || k;
-    if (cloudKey === "updated_at" && typeof v === "number") {
-      out[cloudKey] = new Date(v).toISOString();
-    } else if (cloudKey === "created_at" && typeof v === "number") {
+    // Convert numeric timestamps to ISO strings
+    if ((cloudKey === "updated_at" || cloudKey === "created_at") && typeof v === "number") {
       out[cloudKey] = new Date(v).toISOString();
     } else {
       out[cloudKey] = v;
@@ -238,7 +239,7 @@ function toLocal(cloudRecord, tableName) {
   return out;
 }
 
-// ---------- Supabase fetch with retry ----------
+// ---------- Supabase fetch ----------
 async function sbFetch(path, options = {}) {
   const url = getSupabaseUrl();
   const key = getSupabaseKey();
@@ -290,7 +291,25 @@ export function isOnline() {
   return typeof navigator !== "undefined" && navigator.onLine;
 }
 
-// ---------- PUSH: Local → Cloud ----------
+// ---------- PUSH ----------
+// KEY FIX: Normalize all records in a batch to have the SAME keys
+function normalizeBatch(payloads) {
+  // Collect all keys across all records
+  const allKeys = new Set();
+  for (const p of payloads) {
+    for (const k of Object.keys(p)) allKeys.add(k);
+  }
+  const keysArray = [...allKeys];
+  // For each record, fill in missing keys with null
+  return payloads.map((p) => {
+    const out = {};
+    for (const k of keysArray) {
+      out[k] = p[k] !== undefined ? p[k] : null;
+    }
+    return out;
+  });
+}
+
 export async function pushTable(tableName, records) {
   if (!records.length) return { pushed: 0 };
 
@@ -300,22 +319,26 @@ export async function pushTable(tableName, records) {
   const payload = records.map((r) => {
     const cloud = toCloud(r, tableName);
     delete cloud.syncVersion;
-    // Clean undefined values — prevents Supabase rejections
+    delete cloud.sync_version;
+    // Clean undefined/null-free
     Object.keys(cloud).forEach((k) => {
       if (cloud[k] === undefined) delete cloud[k];
     });
     return cloud;
   });
 
+  // NEW: Normalize so all records share the same keys
+  const normalized = normalizeBatch(payload);
+
   await sbFetch(`/${config.supabaseTable}`, {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify(normalized),
   });
 
   return { pushed: records.length };
 }
 
-// ---------- PULL: Cloud → Local ----------
+// ---------- PULL ----------
 export async function pullTable(tableName, sinceTs) {
   const config = SYNC_TABLES.find((t) => t.name === tableName);
   if (!config) return { pulled: 0, updated: 0 };
@@ -349,7 +372,7 @@ export async function pullTable(tableName, sinceTs) {
   return { pulled, updated };
 }
 
-// ---------- SINGLE RECORD PUSH ----------
+// ---------- SINGLE PUSH ----------
 export async function pushRecord(tableName, record) {
   if (!isSyncConfigured()) return;
   if (!isOnline()) {
@@ -397,7 +420,7 @@ async function flushBatch() {
   }
 }
 
-// ---------- SYNC QUEUE ----------
+// ---------- QUEUE ----------
 export async function queueOperation(tableName, recordId, action, data) {
   await db.syncQueue.add({
     table: tableName,
@@ -444,7 +467,7 @@ export async function processQueue() {
   return { processed, failed };
 }
 
-// ---------- FULL BIDIRECTIONAL SYNC ----------
+// ---------- FULL SYNC ----------
 let syncInProgress = false;
 
 export async function fullSync() {
@@ -458,10 +481,9 @@ export async function fullSync() {
     const lastSync = parseInt(localStorage.getItem("rozy-pos-last-sync") || "0");
     const results = { pushed: 0, pulled: 0, updated: 0 };
 
-    // Step 1: Process pending queue
     await processQueue();
 
-    // Step 2: Pull changes from cloud
+    // Pull
     for (const table of SYNC_TABLES) {
       try {
         const pull = await pullTable(table.name, lastSync);
@@ -472,8 +494,7 @@ export async function fullSync() {
       }
     }
 
-    // Step 3: Push ALL local records (not just on first sync)
-    // This ensures products/categories/etc. always flow to cloud
+    // Push all
     for (const table of SYNC_TABLES) {
       try {
         const localRecords = await db.table(table.name).toArray();
