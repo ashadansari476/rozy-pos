@@ -1,14 +1,13 @@
 import { db } from "./db";
 import { pushSingleProduct, deleteProductRemote } from "./supabase";
+import { pushRecord } from "./syncEngine";
 
 // ============ PRODUCTS ============
 
-// Get all products (no stock — stock is per-shop now)
 export async function getAllProducts() {
   return await db.products.toArray();
 }
 
-// Get products with stock for a specific shop
 export async function getProductsWithStock(shopId) {
   const products = await db.products.toArray();
   const stocks = await db.shopStock.where("shopId").equals(shopId).toArray();
@@ -24,6 +23,28 @@ export async function getProductsWithStock(shopId) {
 
 export async function getProduct(id) {
   return await db.products.get(id);
+}
+
+// Helper — push a single shopStock record to cloud
+async function pushShopStock(shopId, productId) {
+  try {
+    const record = await db.shopStock
+      .where("[shopId+productId]")
+      .equals([shopId, productId])
+      .first();
+    if (!record) return;
+
+    pushRecord("shopStock", {
+      id: record.id,
+      shopId: record.shopId,
+      productId: record.productId,
+      stock: record.stock || 0,
+      lowStock: record.lowStock || 5,
+      updatedAt: Date.now(),
+    }).catch(() => {});
+  } catch (e) {
+    console.warn("Failed to push shopStock:", e.message);
+  }
 }
 
 export async function addProduct(product) {
@@ -44,23 +65,24 @@ export async function addProduct(product) {
     lowStock: product.lowStock || 5,
   });
 
-  // Push to cloud
+  // Push product + shopStock to cloud
   pushSingleProduct(productId).catch(() => {});
+  pushShopStock(shopId, productId);
 
   return productId;
 }
 
 export async function updateProduct(id, product) {
-  // Update product (excluding stock — that lives in shopStock now)
   const { stock, lowStock, ...rest } = product;
   await db.products.update(id, {
     ...rest,
     updatedAt: Date.now(),
   });
 
+  const shopId = localStorage.getItem("rozy-pos-current-shop") || "rozy";
+
   // Update stock for current shop
   if (stock !== undefined || lowStock !== undefined) {
-    const shopId = localStorage.getItem("rozy-pos-current-shop") || "rozy";
     const existing = await db.shopStock
       .where("[shopId+productId]")
       .equals([shopId, id])
@@ -79,6 +101,9 @@ export async function updateProduct(id, product) {
         lowStock: lowStock || 5,
       });
     }
+
+    // Push updated stock
+    pushShopStock(shopId, id);
   }
 
   // Push updated product to cloud
@@ -145,7 +170,6 @@ export async function bulkImportProducts(rows) {
       active: true,
     });
 
-    // Stock goes to shopStock
     await db.shopStock.add({
       shopId,
       productId,
@@ -153,8 +177,8 @@ export async function bulkImportProducts(rows) {
       lowStock: parseFloat(r.lowStock) || 5,
     });
 
-    // Push to cloud
     pushSingleProduct(productId).catch(() => {});
+    pushShopStock(shopId, productId);
   }
 }
 

@@ -75,17 +75,28 @@ export async function saveSale({
     createdAt: ts,
   }).catch(() => {});
 
-  // Deduct stock from THIS shop's stock (shopStock table)
+  // Deduct stock from THIS shop's shopStock + push updated stock to cloud
   for (const it of items) {
     const existing = await db.shopStock
       .where("[shopId+productId]")
       .equals([shop, it.id])
       .first();
+
     if (existing) {
       const newStock = Math.max(0, (existing.stock || 0) - it.qty);
       await db.shopStock.update(existing.id, { stock: newStock });
 
-      // Log stock movement — WITH shopId and userName
+      // ✅ Push updated shopStock to cloud
+      pushRecord("shopStock", {
+        id: existing.id,
+        shopId: shop,
+        productId: it.id,
+        stock: newStock,
+        lowStock: existing.lowStock || 5,
+        updatedAt: ts,
+      }).catch(() => {});
+
+      // Log stock movement
       await db.stockMovements.add({
         shopId: shop,
         ts,
@@ -102,7 +113,7 @@ export async function saveSale({
     }
   }
 
-  // Audit log — WITH shopId and userName
+  // Audit log
   await db.auditLog.add({
     shopId: shop,
     ts,
@@ -113,7 +124,7 @@ export async function saveSale({
     details: { billNo, total, shopId: shop },
   });
 
-  // Trigger sync
+  // Trigger full sync
   import("../stores/syncStore").then(({ useSync }) => {
     useSync.getState().sync();
   }).catch(() => {});
