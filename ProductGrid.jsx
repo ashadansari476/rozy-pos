@@ -1,0 +1,109 @@
+import { AlertTriangle } from "lucide-react";
+
+// moves the soft highlight on a tile to wherever the pointer is
+function trackLight(e) {
+  const r = e.currentTarget.getBoundingClientRect();
+  e.currentTarget.style.setProperty("--mx", `${e.clientX - r.left}px`);
+  e.currentTarget.style.setProperty("--my", `${e.clientY - r.top}px`);
+}
+
+export default function ProductGrid({ products, onAdd }) {
+  if (products.length === 0) {
+    return (
+      <div className="text-center py-20 text-ink-muted">
+        No products found. Add products first in the Products screen.
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 sm:gap-3">
+      {products.map((p) => {
+        const low = (p.stock || 0) <= (p.lowStock || 0);
+        const imageUrl = p.imageUrl || p.imageDataUrl;
+        return (
+          <button
+            key={p.id}
+            onClick={() => onAdd(p)}
+            onPointerMove={trackLight}
+            className="product-tile p-2 sm:p-3 text-left active:scale-[0.97] transition overflow-hidden"
+          >
+            {/* Image */}
+            <div
+              className="aspect-square rounded-xl mb-2 flex items-center
+                          justify-center text-3xl overflow-hidden"
+              style={{
+                background: "linear-gradient(135deg, rgba(255,242,204,0.9) 0%, rgba(255,214,150,0.7) 100%)",
+                boxShadow: "inset 0 2px 6px rgba(107, 68, 35, 0.08)",
+              }}
+            >
+              {imageUrl ? (
+                <img
+                  src={imageUrl}
+                  alt={p.name}
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                />
+              ) : (
+                getCategoryIcon(p.category)
+              )}
+            </div>
+
+            {/* Name — single line, truncate with ellipsis */}
+            <div
+              className="font-semibold text-xs sm:text-sm truncate"
+              style={{
+                color: "#3A2410",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+              title={p.name}
+            >
+              {p.name}
+            </div>
+
+            {/* Price + Unit */}
+            <div className="flex items-baseline justify-between mt-1">
+              <div
+                className="font-mono font-bold text-sm"
+                style={{ color: "#8B1E1E" }}
+              >
+                ₹{p.price}
+              </div>
+              <div
+                className="text-[10px] sm:text-xs"
+                style={{ color: "var(--ink-muted)" }}
+              >
+                /{p.unit}
+              </div>
+            </div>
+
+            {/* Low stock warning */}
+            {low && (
+              <div
+                className="flex items-center gap-1 text-[10px] mt-1"
+                style={{ color: "#E67E22" }}
+              >
+                <AlertTriangle size={10} />
+                <span>
+                  {p.stock} {p.unit}
+                </span>
+              </div>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function getCategoryIcon(cat) {
+  const map = {
+    Bakery: "🥖",
+    Sweets: "🍬",
+    Snacks: "🥨",
+    Beverages: "☕",
+  };
+  return map[cat] || "📦";
+}

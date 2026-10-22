@@ -4,10 +4,10 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg:          "#E8DCC4",
+        bg:          "rgb(255 255 255 / <alpha-value>)",
         bgGradient:  "linear-gradient(135deg, #E8DCC4 0%, #D4B896 100%)",
-        surface:       "#FFF8E7",
-        "surface-alt": "#FDF3DD",
+        surface:       "rgb(255 255 255 / <alpha-value>)",
+        "surface-alt": "rgb(255 255 255 / <alpha-value>)",
 
         // Wood palette
         wood: {
@@ -33,17 +33,17 @@ export default {
           light:   "#FFF8E7",
         },
 
-        border: "#B8935A",
+        border: "rgba(120, 80, 50, 0.2)",
       },
       fontFamily: {
-        serif: ["Fraunces", "Georgia", "serif"],
+        serif: ["Bricolage Grotesque", "Inter", "system-ui", "sans-serif"],
         sans:  ["Inter", "system-ui", "sans-serif"],
         mono:  ["JetBrains Mono", "monospace"],
       },
       borderRadius: { xl2: "18px" },
       boxShadow: {
-        warm:  "0 2px 12px rgba(107, 68, 35, 0.12)",
-        warmH: "0 8px 28px rgba(107, 68, 35, 0.22)",
+        warm:  "0 10px 30px rgba(90, 50, 80, 0.16)",
+        warmH: "0 24px 60px rgba(90, 50, 80, 0.30)",
       },
     },
   },
