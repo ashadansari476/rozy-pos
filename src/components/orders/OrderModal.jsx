@@ -4,6 +4,7 @@ import { createOrder, updateOrder } from "../../lib/customers";
 import { useApp } from "../../stores/appStore";
 import { Plus, Trash2, Calendar, User, Phone, MapPin } from "lucide-react";
 import CustomerPicker from "../customers/CustomerPicker";
+import { localDateKey } from "../../lib/dates";
 
 export default function OrderModal({ open, onClose, products, editingOrder, onSaved }) {
   const user = useApp((s) => s.user);
@@ -37,7 +38,7 @@ export default function OrderModal({ open, onClose, products, editingOrder, onSa
     } else {
       setCustomer(null);
       setItems([]);
-      setDeliveryDate(new Date(Date.now() + 86400000).toISOString().slice(0, 10));
+      setDeliveryDate(localDateKey(new Date(Date.now() + 86400000)));
       setOrderType("pickup");
       setAddress("");
       setNotes("");
@@ -124,10 +125,10 @@ export default function OrderModal({ open, onClose, products, editingOrder, onSa
         size="lg"
       >
         {/* Customer */}
-        <div className="bg-bg rounded-xl p-4 mb-4">
+        <div className="bg-bg/45 rounded-xl p-4 mb-4">
           <label className="label">Customer *</label>
           {customer ? (
-            <div className="flex items-center gap-3 bg-surface rounded-xl p-3">
+            <div className="flex items-center gap-3 bg-surface/70 rounded-xl p-3">
               <div className="w-10 h-10 rounded-full bg-primary-light text-primary flex items-center justify-center">
                 <User size={18} />
               </div>
@@ -166,7 +167,7 @@ export default function OrderModal({ open, onClose, products, editingOrder, onSa
           </div>
 
           {items.length === 0 ? (
-            <div className="bg-bg rounded-xl p-6 text-center text-ink-muted text-sm">
+            <div className="bg-bg/45 rounded-xl p-6 text-center text-ink-muted text-sm">
               No items yet — click "Add Item"
             </div>
           ) : (
@@ -174,7 +175,7 @@ export default function OrderModal({ open, onClose, products, editingOrder, onSa
               {items.map((it, idx) => {
                 const lineTotal = (parseFloat(it.qty) || 0) * (parseFloat(it.price) || 0);
                 return (
-                  <div key={idx} className="bg-bg rounded-xl p-3 space-y-2">
+                  <div key={idx} className="bg-bg/45 rounded-xl p-3 space-y-2">
                     <div className="flex gap-2">
                       <select
                         className="input flex-1"
@@ -277,8 +278,8 @@ export default function OrderModal({ open, onClose, products, editingOrder, onSa
           />
         </div>
         {/* Payment */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-bg rounded-xl p-3 text-center">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="bg-bg/45 rounded-xl p-3 text-center">
             <div className="text-xs text-ink-muted uppercase">Total</div>
             <div className="font-mono text-xl font-bold text-primary mt-1">
               ₹{total.toFixed(2)}

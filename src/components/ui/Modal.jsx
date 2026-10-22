@@ -17,7 +17,7 @@ export default function Modal({ open, onClose, title, children, size = "md" }) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+          className="fixed inset-0 bg-[#2b1a3a]/35 backdrop-blur-md z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
         >
           <motion.div
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
@@ -25,15 +25,15 @@ export default function Modal({ open, onClose, title, children, size = "md" }) {
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
             transition={{ duration: 0.15 }}
             onClick={(e) => e.stopPropagation()}
-            className={`bg-surface shadow-warmH w-full ${sizes[size]} max-h-[95vh] sm:max-h-[90vh] flex flex-col
+            className={`bg-surface/85 backdrop-blur-2xl shadow-warmH w-full ${sizes[size]} max-h-[95vh] sm:max-h-[90vh] flex flex-col
                         rounded-t-xl2 rounded-b-none sm:rounded-xl2`}
-            style={{ border: "2px solid #B8935A" }}
+            style={{ border: "2px solid var(--edge-line)" }}
           >
             <div
               className="flex items-center justify-between p-5"
               style={{
-                borderBottom: "1px solid #B8935A",
-                background: "linear-gradient(180deg, #FFF8E7 0%, #FDF3DD 100%)",
+                borderBottom: "1px solid var(--edge-line)",
+                background: "linear-gradient(180deg, var(--surface) 0%, var(--surface-alt) 100%)",
               }}
             >
               <h2 className="font-serif text-xl font-semibold" style={{ color: "#8B1E1E" }}>

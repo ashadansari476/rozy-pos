@@ -3,10 +3,13 @@
 // Caches app shell for offline use
 // ============================================================
 
-const CACHE_NAME = "rozy-pos-v1";
+const CACHE_NAME = "rozy-pos-v2";
 const APP_SHELL = [
   "/",
   "/index.html",
+  "/manifest.webmanifest",
+  "/favicon.svg",
+  "/icon-192.png",
 ];
 
 // ---------- Install: cache app shell ----------
@@ -42,6 +45,11 @@ self.addEventListener("fetch", (event) => {
 
   // Don't cache Supabase API calls — always go to network
   if (url.hostname.includes("supabase")) {
+    return;
+  }
+
+  // Only cache files from this site (and Google Fonts). Everything else goes straight to the network.
+  if (url.origin !== self.location.origin && !url.hostname.endsWith("gstatic.com") && !url.hostname.endsWith("googleapis.com")) {
     return;
   }
 

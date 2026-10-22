@@ -64,7 +64,7 @@ export default function Expenses() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="p-4 lg:p-6 pb-4 border-b border-border bg-surface">
+      <div className="p-4 lg:p-6 pb-4 border-b border-border bg-surface/70">
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <div className="flex-1 min-w-[200px]">
             <h1 className="font-serif text-2xl text-primary font-semibold flex items-center gap-2">
@@ -91,7 +91,7 @@ export default function Expenses() {
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
                 range === r.k
                   ? "bg-primary text-white shadow-warm"
-                  : "bg-bg text-ink hover:bg-primary-light"
+                  : "bg-bg/45 text-ink hover:bg-primary-light"
               }`}
             >
               {r.label}
@@ -138,7 +138,7 @@ export default function Expenses() {
                             </span>
                             <span className="font-mono">₹{amount.toFixed(2)} ({pct.toFixed(0)}%)</span>
                           </div>
-                          <div className="h-1.5 bg-bg rounded-full overflow-hidden">
+                          <div className="h-1.5 bg-bg/45 rounded-full overflow-hidden">
                             <div
                               className="h-full bg-primary rounded-full"
                               style={{ width: `${pct}%` }}
@@ -167,8 +167,8 @@ export default function Expenses() {
               </div>
             ) : (
               <div className="card overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-bg">
+                <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-sm">
+                  <thead className="bg-bg/45">
                     <tr className="text-left">
                       <th className="p-3 text-xs uppercase text-ink-muted font-semibold">Date</th>
                       <th className="p-3 text-xs uppercase text-ink-muted font-semibold">Category</th>
@@ -216,7 +216,7 @@ export default function Expenses() {
                       );
                     })}
                   </tbody>
-                </table>
+                </table></div>
               </div>
             )}
           </>

@@ -67,7 +67,7 @@ export default function Suppliers() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="p-4 lg:p-6 pb-4 border-b border-border bg-surface">
+      <div className="p-4 lg:p-6 pb-4 border-b border-border bg-surface/70">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex-1 min-w-[200px]">
             <h1 className="font-serif text-2xl text-primary font-semibold flex items-center gap-2">
@@ -144,7 +144,7 @@ export default function Suppliers() {
                     </div>
                   )}
 
-                  <div className="bg-bg rounded-xl p-3 mb-3">
+                  <div className="bg-bg/45 rounded-xl p-3 mb-3">
                     <div className="flex justify-between text-xs">
                       <span className="text-ink-muted">Purchases</span>
                       <span className="font-mono font-semibold">{supplierPurchases.length}</span>

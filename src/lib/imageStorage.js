@@ -1,4 +1,5 @@
 import { getSupabaseUrl, getSupabaseKey } from "./supabase";
+import { authHeaders } from "./supabaseAuth";
 
 const BUCKET = "product-images";
 
@@ -19,8 +20,7 @@ export async function uploadProductImage(productId, blob) {
   const res = await fetch(uploadUrl, {
     method: "POST",
     headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
+      ...(await authHeaders()),
       "Content-Type": "image/jpeg",
       "x-upsert": "true",
     },
@@ -55,8 +55,7 @@ export async function deleteProductImage(imageUrl) {
     await fetch(deleteUrl, {
       method: "DELETE",
       headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
+        ...(await authHeaders()),
       },
     });
   } catch (e) {

@@ -115,7 +115,7 @@ export default function DayEnd() {
         ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-bg rounded-xl p-3">
+              <div className="bg-bg/45 rounded-xl p-3">
                 <div className="text-xs text-ink-muted uppercase">Opening Cash</div>
                 <div className="font-mono text-lg font-bold text-ink mt-1">
                   ₹{(drawer.openingCash || 0).toFixed(2)}
@@ -137,14 +137,14 @@ export default function DayEnd() {
 
             {dayClosed ? (
               <>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-bg rounded-xl p-3 text-center">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="bg-bg/45 rounded-xl p-3 text-center">
                     <div className="text-[10px] text-ink-muted uppercase">Expected</div>
                     <div className="font-mono text-base font-bold mt-1">
                       ₹{drawer.expectedCash?.toFixed(2)}
                     </div>
                   </div>
-                  <div className="bg-bg rounded-xl p-3 text-center">
+                  <div className="bg-bg/45 rounded-xl p-3 text-center">
                     <div className="text-[10px] text-ink-muted uppercase">Actual</div>
                     <div className="font-mono text-base font-bold mt-1">
                       ₹{drawer.closingCash?.toFixed(2)}
@@ -175,7 +175,7 @@ export default function DayEnd() {
                 </div>
 
                 {drawer.notes && (
-                  <div className="bg-bg rounded-xl p-3 text-xs">
+                  <div className="bg-bg/45 rounded-xl p-3 text-xs">
                     <b>Notes:</b> {drawer.notes}
                   </div>
                 )}
@@ -215,7 +215,7 @@ export default function DayEnd() {
           <h2 className="font-semibold text-ink mb-3">🏆 Top Items Today</h2>
           <div className="space-y-2">
             {summary.topItems.map((it, i) => (
-              <div key={it.name} className="flex justify-between text-sm bg-bg rounded-lg p-2">
+              <div key={it.name} className="flex justify-between text-sm bg-bg/45 rounded-lg p-2">
                 <span className="truncate">
                   <b>{i + 1}.</b> {it.name}
                 </span>
@@ -359,7 +359,7 @@ function Stat({ label, value, color }) {
     warning: "text-warning",
   };
   return (
-    <div className="bg-bg rounded-xl p-3">
+    <div className="bg-bg/45 rounded-xl p-3">
       <div className="text-[10px] text-ink-muted uppercase tracking-wider">{label}</div>
       <div className={`font-mono text-lg font-bold mt-1 ${colorMap[color]}`}>{value}</div>
     </div>
@@ -379,7 +379,7 @@ function Row({ label, value }) {
 function ModalLike({ children, onClose, title }) {
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-surface rounded-xl2 shadow-warmH max-w-md w-full p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface/70 rounded-xl2 shadow-warmH max-w-md w-full p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-serif text-xl text-primary font-semibold">{title}</h2>
           <button onClick={onClose} className="p-2 text-ink-muted hover:bg-primary-light rounded-lg">

@@ -43,7 +43,10 @@ export default function ToastContainer() {
   if (items.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[5000] flex flex-col gap-2 pointer-events-none">
+    <div
+      className="fixed left-1/2 -translate-x-1/2 z-[5000] flex flex-col gap-2 pointer-events-none"
+      style={{ top: "calc(12px + env(safe-area-inset-top, 0px))" }}
+    >
       {items.map((t) => (
         <ToastItem key={t.id} toast={t} />
       ))}

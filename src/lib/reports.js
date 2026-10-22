@@ -1,4 +1,6 @@
 import { db } from "./db";
+import { localDateKey } from "./dates";
+import { netCash } from "./money";
 
 // Get sales within a date range, optionally filtered by counter
 export async function getSalesInRange({ from, to, counter }) {
@@ -26,7 +28,7 @@ export async function buildReport({ from, to, counter }) {
   const payment = { cash: 0, upi: 0, card: 0 };
   for (const s of sales) {
     if (s.payment) {
-      payment.cash += s.payment.cash || 0;
+      payment.cash += netCash(s);
       payment.upi += s.payment.upi || 0;
       payment.card += s.payment.card || 0;
     }
@@ -81,7 +83,7 @@ export async function buildReport({ from, to, counter }) {
   // Daily breakdown (for multi-day ranges)
   const dailyMap = {};
   for (const s of sales) {
-    const day = new Date(s.ts).toISOString().slice(0, 10);
+    const day = localDateKey(new Date(s.ts));
     if (!dailyMap[day]) dailyMap[day] = { date: day, revenue: 0, bills: 0 };
     dailyMap[day].revenue += s.total || 0;
     dailyMap[day].bills += 1;

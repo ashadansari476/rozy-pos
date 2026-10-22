@@ -110,7 +110,7 @@ export default function CSVImport({ open, onClose, onImport }) {
           <div className="card overflow-hidden mb-4">
             <div className="overflow-x-auto max-h-64">
               <table className="w-full text-xs">
-                <thead className="bg-bg sticky top-0">
+                <thead className="bg-bg/45 sticky top-0">
                   <tr>
                     <th className="text-left p-2 font-semibold text-ink-muted">Name</th>
                     <th className="text-left p-2 font-semibold text-ink-muted">Category</th>

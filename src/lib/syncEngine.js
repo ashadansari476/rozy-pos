@@ -3,6 +3,7 @@
 // ============================================================
 
 import { db } from "./db";
+import { authHeaders } from "./supabaseAuth";
 import { getSupabaseUrl, getSupabaseKey } from "./supabase";
 
 // ---------- Tables to sync ----------
@@ -278,8 +279,7 @@ async function sbFetch(path, options = {}) {
       const res = await fetch(fullUrl, {
         ...options,
         headers: {
-          apikey: key,
-          Authorization: `Bearer ${key}`,
+          ...(await authHeaders()),
           "Content-Type": "application/json",
           Prefer: "resolution=merge-duplicates,return=representation",
           ...(options.headers || {}),
@@ -365,10 +365,31 @@ export async function pullTable(tableName, sinceTs) {
   const config = SYNC_TABLES.find((t) => t.name === tableName);
   if (!config) return { pulled: 0, updated: 0 };
 
-  const query = `/${config.supabaseTable}?select=*&limit=500&order=id.desc`;
-
-  const remote = await sbFetch(query);
-  if (!Array.isArray(remote)) return { pulled: 0, updated: 0 };
+  // The old code only ever fetched the newest 500 rows of each table, so a new phone or
+  // laptop never received older sales and its reports were wrong. The FIRST pull of each
+  // table now pages through everything; later pulls only need the newest rows.
+  const PAGE = 500;
+  const doneKey = `pulledAll_${tableName}`;
+  const needFull = !(await db.settings.get(doneKey));
+  let remote = [];
+  let complete = false;
+  for (let offset = 0; offset < (needFull ? 500000 : PAGE); offset += PAGE) {
+    const page = await sbFetch(
+      `/${config.supabaseTable}?select=*&limit=${PAGE}&offset=${offset}&order=id.desc`
+    );
+    if (!Array.isArray(page)) {
+      if (offset === 0) return { pulled: 0, updated: 0 };
+      break;
+    }
+    remote = remote.concat(page);
+    if (page.length < PAGE) {
+      complete = true;
+      break;
+    }
+  }
+  if (needFull && complete) {
+    await db.settings.put({ key: doneKey, value: true });
+  }
 
   let pulled = 0;
   let updated = 0;
@@ -425,6 +446,15 @@ export async function pullTable(tableName, sinceTs) {
   }
 
   return { pulled, updated };
+}
+
+// ---------- DELETE FROM CLOUD ----------
+// Deleting only on this device is not enough: the next pull would bring the record back.
+export async function deleteRemote(tableName, id) {
+  const config = SYNC_TABLES.find((t) => t.name === tableName);
+  if (!config) throw new Error(`Unknown table ${tableName}`);
+  if (!isOnline()) throw new Error("You are offline");
+  await sbFetch(`/${config.supabaseTable}?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 // ---------- SINGLE PUSH ----------
@@ -501,7 +531,11 @@ export async function processQueue() {
 
   for (const op of pending) {
     try {
-      await pushTable(op.table, [op.data]);
+      if (op.action === "delete") {
+        await deleteRemote(op.table, op.recordId);
+      } else {
+        await pushTable(op.table, [op.data]);
+      }
       await db.syncQueue.delete(op.id);
       processed++;
     } catch (e) {

@@ -23,12 +23,22 @@ import CompareShops from "./screens/CompareShops";
 import ThemePreview from "./screens/ThemePreview";
 import Backup from "./screens/Backup";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
+import ToastContainer from "./components/ui/Toast";
 
 export default function App() {
   const user = useApp((s) => s.user);
-  if (!user) return <Login />;
+  if (!user) {
+    return (
+      <>
+        <Login />
+        <ToastContainer />
+      </>
+    );
+  }
 
   return (
+    <>
+    <ToastContainer />
     <Routes>
       <Route element={<AppShell />}>
         <Route path="/" element={<Navigate to="/billing" replace />} />
@@ -62,5 +72,6 @@ export default function App() {
         <Route path="*" element={<Navigate to="/billing" replace />} />
       </Route>
     </Routes>
+    </>
   );
 }

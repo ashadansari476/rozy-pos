@@ -1,9 +1,11 @@
 import { db } from "./db";
+import { localDateKey } from "./dates";
+import { netCash } from "./money";
 
 // ============ CASH RECONCILIATION ============
 
 function todayKey() {
-  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  return localDateKey(); // YYYY-MM-DD, local time
 }
 
 export async function getTodayCash(shopId) {
@@ -69,7 +71,7 @@ export async function endDay({ shopId, closingCash, user, notes }) {
   // Cash sales only
   let cashSales = 0;
   for (const s of todaySales) {
-    cashSales += s.payment?.cash || 0;
+    cashSales += netCash(s);
   }
 
   const expectedCash = (record.openingCash || 0) + cashSales;
@@ -257,7 +259,7 @@ export async function buildDayEndSummary({ shopId, date }) {
   const payment = { cash: 0, upi: 0, card: 0 };
   for (const s of todaySales) {
     if (s.payment) {
-      payment.cash += s.payment.cash || 0;
+      payment.cash += netCash(s);
       payment.upi += s.payment.upi || 0;
       payment.card += s.payment.card || 0;
     }

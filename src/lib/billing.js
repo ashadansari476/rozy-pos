@@ -1,5 +1,6 @@
-import { db } from "./db";
+import { db, getDeviceTag } from "./db";
 import { pushRecord } from "./syncEngine";
+import { netCash } from "./money";
 
 // Helper — get current shop ID
 function getCurrentShopId() {
@@ -7,6 +8,9 @@ function getCurrentShopId() {
 }
 
 // ============ SAVE SALE ============
+// All local writes happen inside ONE database transaction, so a crash, a closed tab or a
+// dead battery can never leave a bill without its items, a used bill number with no sale,
+// or stock deducted for a sale that was not saved. Cloud pushes happen after it commits.
 
 export async function saveSale({
   shopId,
@@ -18,116 +22,139 @@ export async function saveSale({
   payment,
   customer,
 }) {
-  const shop = shopId || getCurrentShopId();
-  const billNo = await nextBillNumber(shop);
-  const ts = Date.now();
-
-  const saleId = await db.sales.add({
-    shopId: shop,
-    billNo,
-    counter: shop,
-    cashier,
-    ts,
-    subtotal,
-    discount,
-    total,
-    payment,
-    customer: customer || null,
-    customerId: customer?.id || null,
-    customerName: customer?.name || null,
-    customerPhone: customer?.phone || null,
-    channel: customer?.channel || "pos",
-    source: "pos",
-    tax: 0,
-    updatedAt: ts,
-  });
-
-  const saleItems = items.map((it) => ({
-    saleId,
-    productId: it.id,
-    name: it.name,
-    unit: it.unit,
-    qty: it.qty,
-    price: it.price,
-    lineTotal: it.qty * it.price,
-    variant: it.variant || null,
-  }));
-  await db.saleItems.bulkAdd(saleItems);
-
-  // Push sale to cloud
-  pushRecord("sales", {
-    id: saleId,
-    shopId: shop,
-    billNo,
-    ts,
-    cashier,
-    subtotal,
-    discount,
-    tax: 0,
-    total,
-    payment,
-    customerId: customer?.id || null,
-    customerName: customer?.name || null,
-    customerPhone: customer?.phone || null,
-    channel: customer?.channel || "pos",
-    source: "pos",
-    updatedAt: ts,
-    createdAt: ts,
-  }).catch(() => {});
-
-  // Deduct stock from THIS shop's shopStock + push updated stock to cloud
-  for (const it of items) {
-    const existing = await db.shopStock
-      .where("[shopId+productId]")
-      .equals([shop, it.id])
-      .first();
-
-    if (existing) {
-      const newStock = Math.max(0, (existing.stock || 0) - it.qty);
-      await db.shopStock.update(existing.id, { stock: newStock });
-
-      // ✅ Push updated shopStock to cloud
-      pushRecord("shopStock", {
-        id: existing.id,
-        shopId: shop,
-        productId: it.id,
-        stock: newStock,
-        lowStock: existing.lowStock || 5,
-        updatedAt: ts,
-      }).catch(() => {});
-
-      // Log stock movement
-      await db.stockMovements.add({
-        shopId: shop,
-        ts,
-        productId: it.id,
-        productName: it.name,
-        qty: -it.qty,
-        unit: it.unit,
-        reason: "sale",
-        note: `Sale ${billNo}`,
-        cost: it.cost || 0,
-        userName: cashier || "system",
-        balanceAfter: newStock,
-      });
-    }
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error("Cannot save an empty bill");
+  }
+  if (!Number.isFinite(total) || total < 0) {
+    throw new Error("Invalid bill total");
   }
 
-  // Audit log
-  await db.auditLog.add({
-    shopId: shop,
-    ts,
-    userName: cashier || "system",
-    action: "SALE_CREATED",
-    entity: "sale",
-    entityId: saleId,
-    details: { billNo, total, shopId: shop },
-  });
+  const shop = shopId || getCurrentShopId();
+  const ts = Date.now();
+  const pushes = [];
+  let saleId;
+  let billNo;
 
-  // Trigger full sync
-  import("../stores/syncStore").then(({ useSync }) => {
-    useSync.getState().sync();
-  }).catch(() => {});
+  await db.transaction(
+    "rw",
+    [db.sales, db.saleItems, db.shopStock, db.stockMovements, db.auditLog, db.settings],
+    async () => {
+      billNo = await nextBillNumber(shop);
+
+      saleId = await db.sales.add({
+        shopId: shop,
+        billNo,
+        counter: shop,
+        cashier,
+        ts,
+        subtotal,
+        discount,
+        total,
+        payment,
+        customer: customer || null,
+        customerId: customer?.id || null,
+        customerName: customer?.name || null,
+        customerPhone: customer?.phone || null,
+        channel: customer?.channel || "pos",
+        source: "pos",
+        tax: 0,
+        updatedAt: ts,
+      });
+
+      await db.saleItems.bulkAdd(
+        items.map((it) => ({
+          saleId,
+          productId: it.id,
+          name: it.name,
+          unit: it.unit,
+          qty: it.qty,
+          price: it.price,
+          lineTotal: it.qty * it.price,
+          variant: it.variant || null,
+        }))
+      );
+
+      pushes.push([
+        "sales",
+        {
+          id: saleId,
+          shopId: shop,
+          billNo,
+          ts,
+          cashier,
+          subtotal,
+          discount,
+          tax: 0,
+          total,
+          payment,
+          customerId: customer?.id || null,
+          customerName: customer?.name || null,
+          customerPhone: customer?.phone || null,
+          channel: customer?.channel || "pos",
+          source: "pos",
+          updatedAt: ts,
+          createdAt: ts,
+        },
+      ]);
+
+      // Deduct stock from THIS shop's shopStock
+      for (const it of items) {
+        const existing = await db.shopStock
+          .where("[shopId+productId]")
+          .equals([shop, it.id])
+          .first();
+        if (!existing) continue;
+
+        const newStock = Math.max(0, (existing.stock || 0) - it.qty);
+        await db.shopStock.update(existing.id, { stock: newStock, updatedAt: ts });
+
+        pushes.push([
+          "shopStock",
+          {
+            id: existing.id,
+            shopId: shop,
+            productId: it.id,
+            stock: newStock,
+            lowStock: existing.lowStock || 5,
+            updatedAt: ts,
+          },
+        ]);
+
+        await db.stockMovements.add({
+          shopId: shop,
+          ts,
+          productId: it.id,
+          productName: it.name,
+          qty: -it.qty,
+          unit: it.unit,
+          reason: "sale",
+          note: `Sale ${billNo}`,
+          cost: it.cost || 0,
+          userName: cashier || "system",
+          balanceAfter: newStock,
+        });
+      }
+
+      await db.auditLog.add({
+        shopId: shop,
+        ts,
+        userName: cashier || "system",
+        action: "SALE_CREATED",
+        entity: "sale",
+        entityId: saleId,
+        details: { billNo, total, shopId: shop },
+      });
+    }
+  );
+
+  // Cloud push happens AFTER the local commit; failures are queued by pushRecord.
+  for (const [table, record] of pushes) {
+    pushRecord(table, record).catch(() => {});
+  }
+
+  import("../stores/syncStore")
+    .then(({ useSync }) => useSync.getState().sync())
+    .catch(() => {});
 
   return { saleId, billNo, ts };
 }
@@ -143,7 +170,7 @@ export async function nextBillNumber(shopId) {
   const rec = await db.settings.get(key);
   const next = (rec?.value || 0) + 1;
   await db.settings.put({ key, value: next });
-  return `${prefix}-${String(next).padStart(4, "0")}`;
+  return `${prefix}-${getDeviceTag()}-${String(next).padStart(4, "0")}`;
 }
 
 // ============ STATS ============
@@ -168,7 +195,7 @@ export async function getTodayStats(counter) {
 
   const total = sales.reduce((sum, s) => sum + (s.total || 0), 0);
   const count = sales.length;
-  const cash = sales.reduce((sum, s) => sum + (s.payment?.cash || 0), 0);
+  const cash = sales.reduce((sum, s) => sum + netCash(s), 0);
   const upi = sales.reduce((sum, s) => sum + (s.payment?.upi || 0), 0);
   const card = sales.reduce((sum, s) => sum + (s.payment?.card || 0), 0);
 

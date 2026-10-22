@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { pushSingleProduct, deleteProductRemote } from "./supabase";
-import { pushRecord } from "./syncEngine";
+import { pushSingleProduct } from "./supabase";
+import { pushRecord, isSyncConfigured, deleteRemote, queueOperation } from "./syncEngine";
 
 // ============ PRODUCTS ============
 
@@ -111,7 +111,15 @@ export async function updateProduct(id, product) {
 }
 
 export async function deleteProduct(id) {
-  await deleteProductRemote(id);
+  // Remove from the cloud too. If offline, remember the delete and send it at the next sync,
+  // otherwise the product would reappear after the next pull.
+  if (isSyncConfigured()) {
+    try {
+      await deleteRemote("products", id);
+    } catch (e) {
+      await queueOperation("products", id, "delete", null);
+    }
+  }
   return await db.products.delete(id);
 }
 

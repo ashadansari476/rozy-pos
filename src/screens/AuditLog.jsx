@@ -51,7 +51,7 @@ export default function AuditLog() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="p-4 lg:p-6 pb-4 border-b border-border bg-surface">
+      <div className="p-4 lg:p-6 pb-4 border-b border-border bg-surface/70">
         <div className="flex items-center gap-3 mb-4">
           <div className="flex-1">
             <h1 className="font-serif text-2xl text-primary font-semibold flex items-center gap-2">
@@ -69,7 +69,7 @@ export default function AuditLog() {
             className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
               filter === "all"
                 ? "bg-primary text-white"
-                : "bg-bg text-ink hover:bg-primary-light"
+                : "bg-bg/45 text-ink hover:bg-primary-light"
             }`}
           >
             All
@@ -83,7 +83,7 @@ export default function AuditLog() {
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
                   filter === a
                     ? "bg-primary text-white"
-                    : "bg-bg text-ink hover:bg-primary-light"
+                    : "bg-bg/45 text-ink hover:bg-primary-light"
                 }`}
               >
                 {meta.label}
@@ -111,8 +111,8 @@ export default function AuditLog() {
           </div>
         ) : (
           <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-bg">
+            <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-sm">
+              <thead className="bg-bg/45">
                 <tr className="text-left">
                   <th className="p-3 text-xs uppercase text-ink-muted font-semibold">Time</th>
                   <th className="p-3 text-xs uppercase text-ink-muted font-semibold">User</th>
@@ -150,7 +150,7 @@ export default function AuditLog() {
                   );
                 })}
               </tbody>
-            </table>
+            </table></div>
           </div>
         )}
       </div>

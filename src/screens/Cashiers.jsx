@@ -49,7 +49,7 @@ export default function Cashiers() {
 
     if (!username) return alert("Username required");
     if (!editing && !password) return alert("Password required for new cashier");
-    if (password && password.length < 4) return alert("Password must be 4+ characters");
+    if (password && password.length < 6) return alert("Password must be 6+ characters");
 
     try {
       if (editing) {

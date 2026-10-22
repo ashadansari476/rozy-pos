@@ -1,35 +1,78 @@
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ============ SPATIAL THEME ============
+   Frosted-glass panels floating over a soft saffron / rose / pistachio backdrop.
+   All colours live in these variables, so one edit here re-themes every screen. */
+:root {
+  --base: #f6ead8;
+  --surface: rgba(255, 255, 255, 0.66);
+  --surface-alt: rgba(255, 255, 255, 0.5);
+  --surface-input: rgba(255, 255, 255, 0.82);
+  --edge: rgba(255, 255, 255, 0.85);
+  --edge-soft: rgba(255, 255, 255, 0.6);
+  --edge-line: rgba(120, 80, 50, 0.2);
+  --edge-strong: rgba(120, 70, 40, 0.5);
+  --ink-muted: #6b4423;
+  --depth-1: 0 8px 22px rgba(90, 50, 80, 0.14);
+  --depth-2: 0 18px 44px rgba(90, 50, 80, 0.22);
+  --glass-blur: blur(22px) saturate(160%);
+}
+
 * { -webkit-tap-highlight-color: transparent; }
-html, body, #root { height: 100%; }
+html, body { height: 100%; }
+/* dvh = the visible height on phones (excludes the browser address bar); padding keeps
+   content clear of notches and the home bar when installed as an app */
+#root {
+  height: 100vh;
+  height: 100dvh;
+  box-sizing: border-box;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
 
 body {
-  background: linear-gradient(135deg, #E8DCC4 0%, #D4B896 100%);
+  background:
+    radial-gradient(60vw 60vw at 6% -4%, rgba(255, 190, 92, 0.8), transparent 60%),
+    radial-gradient(52vw 52vw at 102% 24%, rgba(245, 159, 180, 0.62), transparent 60%),
+    radial-gradient(58vw 58vw at 38% 108%, rgba(168, 220, 181, 0.7), transparent 60%),
+    var(--base);
   background-attachment: fixed;
-  color: #3A2410;
+  color: #3a2410;
   font-family: 'Inter', system-ui, sans-serif;
   overscroll-behavior: none;
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: rgba(212, 184, 150, 0.3); }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: #B8935A;
+  background: rgba(120, 70, 40, 0.35);
   border-radius: 6px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
-::-webkit-scrollbar-thumb:hover { background: #8B5A2B; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(120, 70, 40, 0.55); background-clip: padding-box; }
 
-/* ---------- Components ---------- */
-.card {
-  @apply bg-surface rounded-xl2 shadow-warm;
-  border: 1px solid #B8935A;
+/* ---------- Glass surfaces ---------- */
+.glass {
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 1px 0 var(--edge), var(--depth-1);
 }
 
+.card {
+  border-radius: 18px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 1px 0 var(--edge), var(--depth-1);
+}
+
+/* ---------- Buttons ---------- */
 .btn {
   @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold
          transition-all duration-150 active:scale-[.97] select-none cursor-pointer;
@@ -37,94 +80,100 @@ body {
 
 .btn-primary {
   @apply btn text-white;
-  background: linear-gradient(180deg, #A62626 0%, #8B1E1E 100%);
-  box-shadow: 0 3px 10px rgba(139, 30, 30, 0.35), inset 0 1px 0 rgba(255,255,255,0.15);
+  background: linear-gradient(180deg, #b83030 0%, #8b1e1e 100%);
+  box-shadow: 0 8px 20px rgba(139, 30, 30, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 .btn-primary:hover {
-  background: linear-gradient(180deg, #B83030 0%, #A62626 100%);
-  box-shadow: 0 5px 16px rgba(139, 30, 30, 0.45), inset 0 1px 0 rgba(255,255,255,0.2);
+  background: linear-gradient(180deg, #c93a3a 0%, #a62626 100%);
+  box-shadow: 0 12px 26px rgba(139, 30, 30, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.34);
+  transform: translateY(-1px);
 }
 .btn-primary:disabled {
-  background: #B8935A;
+  background: rgba(120, 80, 50, 0.35);
   cursor: not-allowed;
   box-shadow: none;
+  transform: none;
 }
 
-.btn-ghost {
-  @apply btn text-ink;
-}
-.btn-ghost:hover { background: rgba(184, 147, 90, 0.15); }
+.btn-ghost { @apply btn text-ink; }
+.btn-ghost:hover { background: rgba(255, 255, 255, 0.5); }
 
 .btn-outline {
   @apply btn text-ink;
-  background: #FDF3DD;
-  border: 1px solid #B8935A;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 0 var(--edge), 0 4px 12px rgba(90, 50, 80, 0.1);
 }
 .btn-outline:hover {
-  border-color: #8B5A2B;
-  background: #FFF2CC;
-  color: #6B4423;
+  background: rgba(255, 255, 255, 0.85);
+  color: #6b4423;
+  transform: translateY(-1px);
 }
 
+/* ---------- Inputs ---------- */
 .input {
-  @apply w-full px-4 py-3 rounded-xl text-ink
-         transition-all placeholder:text-ink-faint
-         focus:outline-none;
-  background: #FFFCF5;
-  border: 1px solid #B8935A;
+  @apply w-full px-4 py-3 rounded-xl text-ink transition-all placeholder:text-ink-faint focus:outline-none;
+  background: var(--surface-input);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 2px 5px rgba(90, 50, 80, 0.08);
 }
 .input:focus {
-  border-color: #8B5A2B;
-  box-shadow: 0 0 0 3px rgba(139, 90, 43, 0.15);
-  background: #FFFFFF;
+  border-color: #b83030;
+  box-shadow: 0 0 0 3px rgba(184, 48, 48, 0.18), inset 0 2px 5px rgba(90, 50, 80, 0.06);
+  background: #ffffff;
 }
 
-.label {
-  @apply block text-sm font-semibold text-ink-muted mb-1.5;
-}
+.label { @apply block text-sm font-semibold text-ink-muted mb-1.5; }
 
-/* Wood panel utility */
+/* ---------- Shell pieces (class names kept so no component edits are needed) ---------- */
 .wood-panel {
-  background: linear-gradient(180deg, #D4B896 0%, #B8935A 100%);
-  border-bottom: 2px solid #6B4423;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  background: var(--surface);
+  border-bottom: 1px solid var(--edge);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
+/* top bar: deep glass so the white header text stays readable */
 .wood-header {
-  background: linear-gradient(180deg, #8B5A2B 0%, #6B4423 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 2px 8px rgba(107, 68, 35, 0.3);
+  background: rgba(58, 30, 60, 0.5);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 10px 30px rgba(58, 30, 60, 0.22);
 }
 
 .wood-sidebar {
-  background: linear-gradient(180deg, #D4B896 0%, #B8935A 50%, #A67F44 100%);
-  border-right: 2px solid #6B4423;
-  box-shadow: inset -1px 0 0 rgba(107, 68, 35, 0.2);
+  background: rgba(255, 255, 255, 0.45);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-right: 1px solid var(--edge);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.5), 14px 0 40px rgba(90, 50, 80, 0.12);
 }
 
-/* Product tile with wood-shelf look */
+/* ---------- Product tile: floating glass card with a light that follows the pointer ---------- */
 .product-tile {
-  background: #FFFCF5;
-  border: 2px solid #D4B896;
-  border-radius: 16px;
-  box-shadow: 0 2px 8px rgba(107, 68, 35, 0.1), inset 0 1px 0 #FFFFFF;
-  transition: all 0.2s ease;
+  --mx: 50%;
+  --my: 20%;
+  background:
+    radial-gradient(220px circle at var(--mx) var(--my), rgba(255, 255, 255, 0.85), transparent 70%),
+    var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 20px;
+  box-shadow: inset 0 1px 0 #fff, var(--depth-1);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
   position: relative;
-}
-.product-tile::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 14px;
-  box-shadow: inset 0 -2px 4px rgba(107, 68, 35, 0.08);
-  pointer-events: none;
+  word-break: break-word;
+  overflow: hidden;
 }
 .product-tile:hover {
-  border-color: #B8935A;
-  box-shadow: 0 6px 20px rgba(107, 68, 35, 0.2), inset 0 1px 0 #FFFFFF;
-  transform: translateY(-2px);
+  transform: translateY(-5px) scale(1.02);
+  box-shadow: inset 0 1px 0 #fff, var(--depth-2);
 }
+.product-tile:active { transform: translateY(-1px) scale(0.98); }
 
-/* Animations */
+/* ---------- Animations ---------- */
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -138,13 +187,19 @@ body {
 
 .pin-dot {
   @apply w-4 h-4 rounded-full transition-all duration-150;
-  border: 2px solid #8B5A2B;
+  border: 2px solid #8b5a2b;
 }
 .pin-dot.filled {
-  background: #8B5A2B;
-  border-color: #6B4423;
+  background: #8b5a2b;
+  border-color: #6b4423;
   transform: scale(1.1);
 }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+  .product-tile:hover { transform: none; }
+}
+
 /* ============ RESPONSIVE FIXES ============ */
 
 /* Prevent horizontal overflow on mobile */
@@ -169,8 +224,3 @@ html, body {
   }
 }
 
-/* Product tile — prevent text overflow */
-.product-tile {
-  word-break: break-word;
-  overflow: hidden;
-}

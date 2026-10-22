@@ -138,7 +138,7 @@ const resources = {
 
 i18n.use(initReactI18next).init({
   resources,
-  lng: "en",
+  lng: (() => { try { return localStorage.getItem("rozy-pos-lang") || "en"; } catch { return "en"; } })(),
   fallbackLng: "en",
   interpolation: { escapeValue: false },
 });

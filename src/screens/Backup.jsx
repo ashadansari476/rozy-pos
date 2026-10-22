@@ -200,25 +200,25 @@ export default function Backup() {
             <Database size={16} className="text-primary" /> Current Data
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="bg-bg rounded-xl p-3">
+            <div className="bg-bg/45 rounded-xl p-3">
               <div className="text-xs text-ink-muted uppercase">Sales</div>
               <div className="font-mono text-lg font-bold text-primary">
                 {stats.stats.sales || 0}
               </div>
             </div>
-            <div className="bg-bg rounded-xl p-3">
+            <div className="bg-bg/45 rounded-xl p-3">
               <div className="text-xs text-ink-muted uppercase">Products</div>
               <div className="font-mono text-lg font-bold text-primary">
                 {stats.stats.products || 0}
               </div>
             </div>
-            <div className="bg-bg rounded-xl p-3">
+            <div className="bg-bg/45 rounded-xl p-3">
               <div className="text-xs text-ink-muted uppercase">Customers</div>
               <div className="font-mono text-lg font-bold text-primary">
                 {stats.stats.customers || 0}
               </div>
             </div>
-            <div className="bg-bg rounded-xl p-3">
+            <div className="bg-bg/45 rounded-xl p-3">
               <div className="text-xs text-ink-muted uppercase">Total Records</div>
               <div className="font-mono text-lg font-bold text-accent">
                 {stats.totalRecords}

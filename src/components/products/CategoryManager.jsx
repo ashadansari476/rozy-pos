@@ -32,7 +32,7 @@ export default function CategoryManager({ open, onClose, categories, onAdd, onUp
 
   return (
     <Modal open={open} onClose={onClose} title="Manage Categories" size="md">
-      <div className="bg-bg rounded-xl p-3 mb-4">
+      <div className="bg-bg/45 rounded-xl p-3 mb-4">
         <label className="label">Add New Category</label>
         <div className="flex gap-2">
           <select
@@ -63,7 +63,7 @@ export default function CategoryManager({ open, onClose, categories, onAdd, onUp
         {categories.map((cat) => (
           <div
             key={cat.id}
-            className="flex items-center gap-2 bg-surface border border-border rounded-xl p-3"
+            className="flex items-center gap-2 bg-surface/70 border border-border rounded-xl p-3"
           >
             {editingId === cat.id ? (
               <>
@@ -89,7 +89,7 @@ export default function CategoryManager({ open, onClose, categories, onAdd, onUp
                 </button>
                 <button
                   onClick={() => setEditingId(null)}
-                  className="p-2 text-ink-muted hover:bg-bg rounded-lg"
+                  className="p-2 text-ink-muted hover:bg-bg/45 rounded-lg"
                 >
                   <X size={16} />
                 </button>

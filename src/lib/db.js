@@ -28,8 +28,59 @@ db.version(7).stores({
   syncQueue: "++id, table, recordId, action, status, createdAt",
 });
 
+// ========== DEVICE-SAFE IDS ==========
+// Every device used to number its records 1, 2, 3 ... and push them to the cloud with
+// that number as the primary key. Two devices (two shops, a phone and a laptop) then
+// overwrote each other's sales. Now each device gets its own block of ids.
+//   id = deviceCode * 2,000,000 + counter    (stays below 2,147,483,647 so it also fits
+//                                              a Supabase int4 column)
+// Old records keep their old small ids; only NEW records use the block.
+const ID_BLOCK = 2_000_000;
+const ID_TABLES = [
+  "products", "sales", "saleItems", "customers", "orders", "orderItems", "expenses",
+  "targets", "cashDrawer", "auditLog", "stockMovements", "wastage", "suppliers",
+  "purchases", "purchaseItems", "shopStock", "users", "batches", "payments",
+];
+
+function getDeviceCode() {
+  try {
+    const saved = parseInt(localStorage.getItem("rozy-pos-device-code") || "", 10);
+    if (saved >= 1 && saved <= 999) return saved;
+    const code = (crypto.getRandomValues(new Uint32Array(1))[0] % 999) + 1;
+    localStorage.setItem("rozy-pos-device-code", String(code));
+    return code;
+  } catch {
+    return 1;
+  }
+}
+
+const DEVICE_CODE = getDeviceCode();
+
+/** 2-character tag unique to this device, e.g. "0A". Used inside bill and order numbers. */
+export function getDeviceTag() {
+  return DEVICE_CODE.toString(36).toUpperCase().padStart(2, "0");
+}
+const blockStart = DEVICE_CODE * ID_BLOCK;
+const idCounters = {};
+
+for (const name of ID_TABLES) {
+  db.table(name).hook("creating", (primKey) => {
+    if (primKey !== undefined) return; // pulled from cloud or explicit id: leave alone
+    idCounters[name] = (idCounters[name] || blockStart) + 1;
+    return idCounters[name];
+  });
+}
+
+async function initIdCounters() {
+  for (const name of ID_TABLES) {
+    const last = await db.table(name).where(":id").between(blockStart, blockStart + ID_BLOCK - 1, true, true).last();
+    idCounters[name] = last ? last.id : blockStart;
+  }
+}
+
 // ========== BOOTSTRAP ==========
 export async function bootstrapSettings() {
+  await initIdCounters();
   const existing = await db.settings.get("shop");
 
   if (!existing) {
@@ -57,7 +108,7 @@ export async function bootstrapSettings() {
         key: "preferences",
         value: { language: "en", keyboardShortcuts: true },
       },
-      { key: "ownerPin", value: "9832" },
+      // NOTE: no default owner PIN. The owner chooses one on first login (see Login.jsx).
     ]);
   }
 

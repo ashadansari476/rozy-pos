@@ -47,7 +47,7 @@ export default function StockAdjustModal({ open, onClose, product, onSaved }) {
 
   return (
     <Modal open={open} onClose={onClose} title={`Adjust Stock — ${product.name}`} size="sm">
-      <div className="bg-bg rounded-xl p-4 mb-5 text-center">
+      <div className="bg-bg/45 rounded-xl p-4 mb-5 text-center">
         <div className="text-xs text-ink-muted uppercase tracking-wider">
           Current Stock
         </div>
@@ -57,7 +57,7 @@ export default function StockAdjustModal({ open, onClose, product, onSaved }) {
       </div>
 
       {/* Add / Remove toggle */}
-      <div className="flex gap-2 mb-4 bg-bg rounded-xl p-1">
+      <div className="flex gap-2 mb-4 bg-bg/45 rounded-xl p-1">
         <button
           onClick={() => setMode("add")}
           className={`flex-1 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition ${

@@ -53,7 +53,7 @@ export default function Customers() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="p-4 lg:p-6 pb-4 border-b border-border bg-surface">
+      <div className="p-4 lg:p-6 pb-4 border-b border-border bg-surface/70">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
           <div className="flex-1 min-w-0">
             <h1 className="font-serif text-xl sm:text-2xl text-primary font-semibold flex items-center gap-2">
@@ -114,7 +114,7 @@ export default function Customers() {
                 </div>
 
                 {c.totalSpent > 0 && (
-                  <div className="bg-bg rounded-xl p-2 mb-3 flex justify-between">
+                  <div className="bg-bg/45 rounded-xl p-2 mb-3 flex justify-between">
                     <div className="text-xs text-ink-muted">Lifetime</div>
                     <div className="font-mono font-semibold text-primary text-sm">
                       ₹{c.totalSpent.toFixed(0)}
@@ -240,7 +240,7 @@ function CustomerDetail({ customer, onClose }) {
     <Modal open={true} onClose={onClose} title={customer.name} size="md">
       <div className="space-y-4">
         {/* Contact */}
-        <div className="bg-bg rounded-xl p-3 space-y-1">
+        <div className="bg-bg/45 rounded-xl p-3 space-y-1">
           {customer.phone && (
             <div className="flex items-center gap-2 text-sm">
               <Phone size={14} className="text-ink-muted" /> {customer.phone}
@@ -311,7 +311,7 @@ function CustomerDetail({ customer, onClose }) {
               ) : (
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {history.map((s) => (
-                    <div key={s.id} className="bg-bg rounded-lg p-2 flex justify-between text-xs">
+                    <div key={s.id} className="bg-bg/45 rounded-lg p-2 flex justify-between text-xs">
                       <div>
                         <div className="font-mono font-semibold">{s.billNo}</div>
                         <div className="text-ink-muted">

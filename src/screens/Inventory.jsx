@@ -57,7 +57,7 @@ export default function Inventory() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="p-4 lg:p-6 pb-4 border-b border-border bg-surface">
+      <div className="p-4 lg:p-6 pb-4 border-b border-border bg-surface/70">
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <div className="flex-1 min-w-[200px]">
             <h1 className="font-serif text-2xl text-primary font-semibold flex items-center gap-2">
@@ -91,7 +91,7 @@ export default function Inventory() {
               className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition ${
                 tab === t.k
                   ? "bg-primary text-white shadow-warm"
-                  : "bg-bg text-ink hover:bg-primary-light"
+                  : "bg-bg/45 text-ink hover:bg-primary-light"
               }`}
             >
               {t.label}
@@ -124,7 +124,7 @@ export default function Inventory() {
                   className={`px-3 py-2 rounded-xl text-xs font-semibold transition ${
                     filter === f.k
                       ? "bg-primary text-white"
-                      : "bg-bg text-ink hover:bg-primary-light"
+                      : "bg-bg/45 text-ink hover:bg-primary-light"
                   }`}
                 >
                   {f.label}
@@ -136,7 +136,7 @@ export default function Inventory() {
             <div className="card overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-bg">
+                  <thead className="bg-bg/45">
                     <tr className="text-left">
                       <th className="p-3 text-xs uppercase text-ink-muted font-semibold">Product</th>
                       <th className="p-3 text-xs uppercase text-ink-muted font-semibold">Category</th>
@@ -227,7 +227,7 @@ export default function Inventory() {
                 </h2>
                 <div className="space-y-2">
                   {expired.map((b) => (
-                    <div key={b.id} className="bg-bg rounded-xl p-3 flex items-center gap-3">
+                    <div key={b.id} className="bg-bg/45 rounded-xl p-3 flex items-center gap-3">
                       <div className="flex-1">
                         <div className="font-semibold text-sm">{b.productName}</div>
                         <div className="text-xs text-ink-muted">
@@ -258,7 +258,7 @@ export default function Inventory() {
               ) : (
                 <div className="space-y-2">
                   {expiring.map((b) => (
-                    <div key={b.id} className="bg-bg rounded-xl p-3 flex items-center gap-3">
+                    <div key={b.id} className="bg-bg/45 rounded-xl p-3 flex items-center gap-3">
                       <div className="flex-1">
                         <div className="font-semibold text-sm">{b.productName}</div>
                         <div className="text-xs text-ink-muted">
@@ -278,7 +278,7 @@ export default function Inventory() {
           <div className="card overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-bg">
+                <thead className="bg-bg/45">
                   <tr className="text-left">
                     <th className="p-3 text-xs uppercase text-ink-muted font-semibold">Time</th>
                     <th className="p-3 text-xs uppercase text-ink-muted font-semibold">Product</th>
@@ -388,7 +388,7 @@ function WastageTab() {
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-bg">
+            <thead className="bg-bg/45">
               <tr className="text-left">
                 <th className="p-3 text-xs uppercase text-ink-muted font-semibold">Date</th>
                 <th className="p-3 text-xs uppercase text-ink-muted font-semibold">Product</th>

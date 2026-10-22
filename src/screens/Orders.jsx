@@ -96,7 +96,7 @@ export default function Orders() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="p-4 lg:p-6 pb-4 border-b border-border bg-surface">
+      <div className="p-4 lg:p-6 pb-4 border-b border-border bg-surface/70">
                <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
           <div className="flex-1 min-w-0">
             <h1 className="font-serif text-xl sm:text-2xl text-primary font-semibold flex items-center gap-2">
@@ -138,7 +138,7 @@ export default function Orders() {
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold capitalize transition ${
                 filter === f
                   ? "bg-primary text-white shadow-warm"
-                  : "bg-bg text-ink hover:bg-primary-light"
+                  : "bg-bg/45 text-ink hover:bg-primary-light"
               }`}
             >
               {f}
@@ -217,7 +217,7 @@ export default function Orders() {
                     </div>
                   </div>
 
-                  <div className="bg-bg rounded-xl p-2 mb-3 text-xs space-y-1">
+                  <div className="bg-bg/45 rounded-xl p-2 mb-3 text-xs space-y-1">
                     <div className="flex justify-between">
                       <span className="text-ink-muted">Items</span>
                       <span className="font-mono">{o.items.length}</span>
@@ -364,7 +364,7 @@ function DeliveryPaymentModal({ order, onClose, onConfirm }) {
 
   return (
     <Modal open={true} onClose={onClose} title={`Deliver Order ${order.orderNo}`} size="md">
-      <div className="bg-bg rounded-xl p-3 mb-4">
+      <div className="bg-bg/45 rounded-xl p-3 mb-4">
         <div className="font-semibold">{order.customerName}</div>
         {order.customerPhone && (
           <div className="text-xs text-ink-muted">{order.customerPhone}</div>
@@ -372,7 +372,7 @@ function DeliveryPaymentModal({ order, onClose, onConfirm }) {
       </div>
 
       <div className="grid grid-cols-3 gap-2 mb-4">
-        <div className="bg-bg rounded-xl p-3 text-center">
+        <div className="bg-bg/45 rounded-xl p-3 text-center">
           <div className="text-xs text-ink-muted uppercase">Total</div>
           <div className="font-mono text-lg font-bold text-primary mt-1">
             ₹{order.totalAmount.toFixed(2)}
@@ -402,7 +402,7 @@ function DeliveryPaymentModal({ order, onClose, onConfirm }) {
               className={`py-2.5 rounded-xl font-semibold text-sm transition ${
                 paymentMode === m
                   ? "bg-primary text-white shadow-warm"
-                  : "bg-bg text-ink hover:bg-primary-light"
+                  : "bg-bg/45 text-ink hover:bg-primary-light"
               }`}
             >
               {m}
@@ -433,7 +433,7 @@ function DeliveryPaymentModal({ order, onClose, onConfirm }) {
               className={`py-2.5 rounded-xl font-semibold text-sm transition ${
                 counter === c
                   ? "bg-primary text-white shadow-warm"
-                  : "bg-bg text-ink hover:bg-primary-light"
+                  : "bg-bg/45 text-ink hover:bg-primary-light"
               }`}
             >
               {c}
@@ -482,7 +482,7 @@ function OrderDetail({ order, onClose, onStatusChange }) {
   return (
     <Modal open={true} onClose={onClose} title={`Order ${order.orderNo}`} size="md">
       <div className="space-y-4">
-        <div className="bg-bg rounded-xl p-3">
+        <div className="bg-bg/45 rounded-xl p-3">
           <div className="font-semibold">{order.customerName}</div>
           {order.customerPhone && (
             <div className="text-xs text-ink-muted">{order.customerPhone}</div>
@@ -500,7 +500,7 @@ function OrderDetail({ order, onClose, onStatusChange }) {
           <div className="text-xs text-ink-muted uppercase font-semibold mb-2">Items</div>
           <div className="space-y-1">
             {order.items.map((it, i) => (
-              <div key={i} className="flex justify-between text-sm bg-bg rounded-lg p-2">
+              <div key={i} className="flex justify-between text-sm bg-bg/45 rounded-lg p-2">
                 <span>{it.productName} × {it.qty}</span>
                 <span className="font-mono">₹{it.lineTotal.toFixed(2)}</span>
               </div>

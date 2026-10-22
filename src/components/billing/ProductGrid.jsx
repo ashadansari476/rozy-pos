@@ -1,5 +1,12 @@
 import { AlertTriangle } from "lucide-react";
 
+// moves the soft highlight on a tile to wherever the pointer is
+function trackLight(e) {
+  const r = e.currentTarget.getBoundingClientRect();
+  e.currentTarget.style.setProperty("--mx", `${e.clientX - r.left}px`);
+  e.currentTarget.style.setProperty("--my", `${e.clientY - r.top}px`);
+}
+
 export default function ProductGrid({ products, onAdd }) {
   if (products.length === 0) {
     return (
@@ -18,6 +25,7 @@ export default function ProductGrid({ products, onAdd }) {
           <button
             key={p.id}
             onClick={() => onAdd(p)}
+            onPointerMove={trackLight}
             className="product-tile p-2 sm:p-3 text-left active:scale-[0.97] transition overflow-hidden"
           >
             {/* Image */}
@@ -25,7 +33,7 @@ export default function ProductGrid({ products, onAdd }) {
               className="aspect-square rounded-xl mb-2 flex items-center
                           justify-center text-3xl overflow-hidden"
               style={{
-                background: "linear-gradient(135deg, #FFF2CC 0%, #FFE8B0 100%)",
+                background: "linear-gradient(135deg, rgba(255,242,204,0.9) 0%, rgba(255,214,150,0.7) 100%)",
                 boxShadow: "inset 0 2px 6px rgba(107, 68, 35, 0.08)",
               }}
             >
@@ -65,7 +73,7 @@ export default function ProductGrid({ products, onAdd }) {
               </div>
               <div
                 className="text-[10px] sm:text-xs"
-                style={{ color: "#6B4423" }}
+                style={{ color: "var(--ink-muted)" }}
               >
                 /{p.unit}
               </div>

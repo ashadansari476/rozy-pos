@@ -84,7 +84,7 @@ export default function Products() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="p-4 lg:p-6 pb-4 border-b border-border bg-surface">
+      <div className="p-4 lg:p-6 pb-4 border-b border-border bg-surface/70">
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
           <div className="flex-1 min-w-0">
             <h1 className="font-serif text-xl sm:text-2xl text-primary font-semibold">
@@ -134,7 +134,7 @@ export default function Products() {
             className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition ${
               activeCategory === "All"
                 ? "bg-primary text-white shadow-warm"
-                : "bg-bg text-ink hover:bg-primary-light"
+                : "bg-bg/45 text-ink hover:bg-primary-light"
             }`}
           >
             All ({products.length})
@@ -148,7 +148,7 @@ export default function Products() {
                 className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition ${
                   activeCategory === cat.name
                     ? "bg-primary text-white shadow-warm"
-                    : "bg-bg text-ink hover:bg-primary-light"
+                    : "bg-bg/45 text-ink hover:bg-primary-light"
                 }`}
               >
                 {cat.icon} {cat.name} ({count})
@@ -194,7 +194,7 @@ export default function Products() {
           <div className="card overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-bg">
+                <thead className="bg-bg/45">
                   <tr className="text-left">
                     <th className="p-3 font-semibold text-ink-muted text-xs uppercase tracking-wider">Name</th>
                     <th className="p-3 font-semibold text-ink-muted text-xs uppercase tracking-wider">Category</th>

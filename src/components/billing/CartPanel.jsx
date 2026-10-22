@@ -28,17 +28,19 @@ export default function CartPanel({ onCheckout, onHold }) {
     <div
       className="h-full flex flex-col rounded-xl2 overflow-hidden"
       style={{
-        background: "#FFF8E7",
-        border: "2px solid #B8935A",
-        boxShadow: "0 4px 16px rgba(107, 68, 35, 0.15)",
+        background: "rgba(255, 255, 255, 0.62)",
+        border: "1px solid var(--edge)",
+        WebkitBackdropFilter: "blur(26px) saturate(160%)",
+        backdropFilter: "blur(26px) saturate(160%)",
+        boxShadow: "inset 0 1px 0 var(--edge), 0 24px 60px rgba(90, 50, 80, 0.24)",
       }}
     >
       {/* Header */}
       <div
         className="p-4 flex-shrink-0"
         style={{
-          borderBottom: "1px solid #B8935A",
-          background: "linear-gradient(180deg, #FFF8E7 0%, #FDF3DD 100%)",
+          borderBottom: "1px solid var(--edge-line)",
+          background: "linear-gradient(180deg, var(--surface) 0%, var(--surface-alt) 100%)",
         }}
       >
         <div className="flex items-center justify-between">
@@ -75,7 +77,7 @@ export default function CartPanel({ onCheckout, onHold }) {
             {items.map((it) => (
               <div
                 key={it.cartKey}
-                className="bg-bg rounded-xl p-3"
+                className="bg-bg/45 rounded-xl p-3"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
@@ -103,7 +105,7 @@ export default function CartPanel({ onCheckout, onHold }) {
                           Math.max(0, it.qty - (it.unit === "kg" ? 0.1 : 1))
                         )
                       }
-                      className="w-8 h-8 rounded-lg bg-surface border border-border hover:border-primary
+                      className="w-8 h-8 rounded-lg bg-surface/70 border border-border hover:border-primary
                                  flex items-center justify-center text-ink transition"
                     >
                       <Minus size={14} />
@@ -123,7 +125,7 @@ export default function CartPanel({ onCheckout, onHold }) {
                       onClick={() =>
                         updateQty(it.cartKey, it.qty + (it.unit === "kg" ? 0.1 : 1))
                       }
-                      className="w-8 h-8 rounded-lg bg-surface border border-border hover:border-primary
+                      className="w-8 h-8 rounded-lg bg-surface/70 border border-border hover:border-primary
                                  flex items-center justify-center text-ink transition"
                     >
                       <Plus size={14} />
@@ -143,7 +145,7 @@ export default function CartPanel({ onCheckout, onHold }) {
       {items.length > 0 && (
         <div
           className="flex-shrink-0 p-4 space-y-3"
-          style={{ borderTop: "1px solid #B8935A" }}
+          style={{ borderTop: "1px solid var(--edge-line)" }}
         >
           <div className="flex justify-between text-sm">
             <span className="text-ink-muted">{t("subtotal")}</span>
@@ -209,7 +211,7 @@ export default function CartPanel({ onCheckout, onHold }) {
       {/* Action buttons */}
       <div
         className="flex-shrink-0 p-4 space-y-2"
-        style={{ borderTop: "1px solid #B8935A" }}
+        style={{ borderTop: "1px solid var(--edge-line)" }}
       >
         <button
           onClick={onHold}

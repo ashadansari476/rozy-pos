@@ -20,7 +20,7 @@ export default function SearchInput({
             <Search
         size={18}
         className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none z-10"
-        style={{ color: "#8B5A2B" }}
+        style={{ color: "var(--edge-strong)" }}
       />
       {/* Input with proper left padding for the icon */}
             <input
@@ -29,18 +29,18 @@ export default function SearchInput({
         className="w-full pl-12 pr-10 py-3 rounded-xl text-ink placeholder:text-ink-faint
                    transition-all text-sm focus:outline-none"
         style={{
-          background: "#FFFCF5",
-          border: "2px solid #D4B896",
+          background: "var(--surface-input)",
+          border: "2px solid var(--edge-soft)",
           boxShadow: "inset 0 1px 3px rgba(107, 68, 35, 0.08)",
         }}
         onFocus={(e) => {
-          e.target.style.borderColor = "#8B5A2B";
+          e.target.style.borderColor = "var(--edge-strong)";
           e.target.style.background = "#FFFFFF";
           e.target.style.boxShadow = "0 0 0 3px rgba(139, 90, 43, 0.15)";
         }}
         onBlur={(e) => {
-          e.target.style.borderColor = "#D4B896";
-          e.target.style.background = "#FFFCF5";
+          e.target.style.borderColor = "var(--edge-soft)";
+          e.target.style.background = "var(--surface-input)";
           e.target.style.boxShadow = "inset 0 1px 3px rgba(107, 68, 35, 0.08)";
         }}
         value={value}
@@ -55,7 +55,7 @@ export default function SearchInput({
           type="button"
           onClick={handleClear}
           className="absolute right-3 top-1/2 -translate-y-1/2 z-10
-                     p-1 rounded-full text-ink-muted hover:text-ink hover:bg-bg transition"
+                     p-1 rounded-full text-ink-muted hover:text-ink hover:bg-bg/45 transition"
           aria-label="Clear search"
         >
           <X size={16} />

@@ -305,7 +305,7 @@ const [cartOpen, setCartOpen] = useState(false);
             className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition ${
               activeCategory === "All"
                 ? "bg-primary text-white shadow-warm"
-                : "bg-surface text-ink hover:bg-primary-light border border-border"
+                : "bg-surface/70 text-ink hover:bg-primary-light border border-border"
             }`}
           >
             All
@@ -317,7 +317,7 @@ const [cartOpen, setCartOpen] = useState(false);
               className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition ${
                 activeCategory === c.name
                   ? "bg-primary text-white shadow-warm"
-                  : "bg-surface text-ink hover:bg-primary-light border border-border"
+                  : "bg-surface/70 text-ink hover:bg-primary-light border border-border"
               }`}
             >
               {c.icon} {c.name}
@@ -326,7 +326,7 @@ const [cartOpen, setCartOpen] = useState(false);
         </div>
 
                 {/* Product grid */}
-        <div className="flex-1 overflow-y-auto -mx-1 px-1 min-h-[200px]">
+        <div className="flex-1 overflow-y-auto -mx-1 px-1 min-h-[200px] pb-24 lg:pb-0">
           <ProductGrid products={filtered} onAdd={handleAdd} />
         </div>
       </div>
@@ -350,11 +350,11 @@ const [cartOpen, setCartOpen] = useState(false);
 
           {/* Sheet */}
           <div
-            className={`bg-surface rounded-t-2xl2 shadow-warmH transition-all duration-300 ${
-              cartOpen ? "h-[80vh]" : "h-16"
-            }`}
+            className="bg-surface/85 backdrop-blur-xl rounded-t-3xl shadow-warmH transition-all duration-300 overflow-hidden"
             style={{
-              borderTop: "2px solid #B8935A",
+              borderTop: "1px solid var(--edge)",
+              height: cartOpen ? "80dvh" : "calc(4rem + env(safe-area-inset-bottom, 0px))",
+              paddingBottom: "env(safe-area-inset-bottom, 0px)",
             }}
           >
             {/* Collapsed bar */}
@@ -403,7 +403,7 @@ const [cartOpen, setCartOpen] = useState(false);
                 {/* Close button */}
                 <button
                   onClick={() => setCartOpen(false)}
-                  className="absolute top-3 right-3 z-10 p-2 rounded-full bg-bg text-ink-muted
+                  className="absolute top-3 right-3 z-10 p-2 rounded-full bg-bg/45 text-ink-muted
                              hover:bg-primary-light transition"
                 >
                   <X size={18} />
@@ -452,7 +452,7 @@ const [cartOpen, setCartOpen] = useState(false);
       {/* Held bills modal */}
       {showHeld && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowHeld(false)}>
-          <div className="bg-surface rounded-xl2 p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-surface/70 rounded-xl2 p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
             <h2 className="font-serif text-xl text-primary font-semibold mb-4">
               ⏸ Held Bills
             </h2>
@@ -463,7 +463,7 @@ const [cartOpen, setCartOpen] = useState(false);
                 {heldBills.map((h) => {
                   const total = h.items.reduce((s, i) => s + i.qty * i.price, 0);
                   return (
-                    <div key={h.id} className="bg-bg rounded-xl p-3 flex items-center gap-3">
+                    <div key={h.id} className="bg-bg/45 rounded-xl p-3 flex items-center gap-3">
                       <div className="flex-1">
                         <div className="font-semibold text-sm">{h.name}</div>
                         <div className="text-xs text-ink-muted">

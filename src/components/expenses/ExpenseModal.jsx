@@ -84,7 +84,7 @@ export default function ExpenseModal({ open, onClose, expense, onSaved }) {
                 className={`py-3 rounded-xl font-semibold text-xs flex flex-col items-center gap-1 transition ${
                   category === c.key
                     ? "bg-primary text-white shadow-warm"
-                    : "bg-bg text-ink hover:bg-primary-light"
+                    : "bg-bg/45 text-ink hover:bg-primary-light"
                 }`}
               >
                 <span className="text-lg">{c.icon}</span>

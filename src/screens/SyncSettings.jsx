@@ -6,6 +6,7 @@ import {
 } from "../lib/supabase";
 import { Cloud, Check, X, RefreshCw, Save, AlertTriangle } from "lucide-react";
 import { fullSync } from "../lib/syncEngine";
+import { getSyncAccount, signInSync, signOutSync } from "../lib/supabaseAuth";
 
 export default function SyncSettings() {
   const user = useApp((s) => s.user);
@@ -15,6 +16,10 @@ export default function SyncSettings() {
   const [testing, setTesting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+  const [account, setAccount] = useState(getSyncAccount());
+  const [email, setEmail] = useState(getSyncAccount()?.email || "");
+  const [pass, setPass] = useState("");
+  const [signingIn, setSigningIn] = useState(false);
 
   useEffect(() => {
     refreshStatus();
@@ -106,8 +111,34 @@ export default function SyncSettings() {
     setSyncing(false);
   };
 
+  const handleSignIn = async () => {
+    if (!email.trim() || !pass) {
+      alert("Enter the sync account email and password");
+      return;
+    }
+    setSigningIn(true);
+    try {
+      await signInSync(email, pass);
+      setAccount(getSyncAccount());
+      setPass("");
+      await refreshStatus();
+      alert("✅ Signed in. This device will now sync as " + email.trim());
+    } catch (e) {
+      alert("❌ " + e.message);
+    }
+    setSigningIn(false);
+  };
+
+  const handleSignOut = async () => {
+    signOutSync();
+    setAccount(null);
+    await refreshStatus();
+  };
+
   const handleDisconnect = () => {
     if (!confirm("Disconnect from cloud sync? Local data stays.")) return;
+    signOutSync();
+    setAccount(null);
     clearSupabaseConfig();
     setUrl("");
     setKey("");
@@ -212,6 +243,49 @@ export default function SyncSettings() {
           )}
         </div>
       </div>
+
+      {/* Sync account (protects the cloud data) */}
+      {status?.enabled && (
+        <div className="card p-5 mb-5">
+          <h2 className="font-semibold text-ink mb-1">Sync account</h2>
+          <p className="text-xs text-ink-muted mb-4">
+            {account
+              ? `Signed in as ${account.email}. Your cloud data is protected by this login.`
+              : "Not signed in: only the public key protects your cloud data. Create one user in Supabase (Authentication, Users), sign in here on every device, then run supabase-security.sql once."}
+          </p>
+          {account ? (
+            <button onClick={handleSignOut} className="btn-outline">Sign out of sync account</button>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <label className="label" htmlFor="sync-email">Account email</label>
+                <input
+                  id="sync-email"
+                  className="input"
+                  type="email"
+                  autoComplete="off"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="label" htmlFor="sync-pass">Account password</label>
+                <input
+                  id="sync-pass"
+                  className="input"
+                  type="password"
+                  autoComplete="off"
+                  value={pass}
+                  onChange={(e) => setPass(e.target.value)}
+                />
+              </div>
+              <button onClick={handleSignIn} disabled={signingIn} className="btn-primary">
+                {signingIn ? "Signing in..." : "Sign in"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Sync Now + Force Resync */}
       {status?.connected && (

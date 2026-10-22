@@ -87,8 +87,8 @@ export default function Dashboard() {
         <div
           className="flex gap-1 rounded-xl p-1 overflow-x-auto max-w-full"
           style={{
-            background: "#FFF8E7",
-            border: "1px solid #B8935A",
+            background: "var(--surface)",
+            border: "1px solid var(--edge-line)",
           }}
         >
           {[
@@ -173,8 +173,8 @@ export default function Dashboard() {
                   <Tooltip
                     formatter={(v) => `₹${v.toFixed(2)}`}
                     contentStyle={{
-                      background: "#FFF8E7",
-                      border: "1px solid #B8935A",
+                      background: "var(--surface)",
+                      border: "1px solid var(--edge-line)",
                       borderRadius: 8,
                     }}
                   />
@@ -198,8 +198,8 @@ export default function Dashboard() {
                   <Tooltip
                     formatter={(v) => `₹${v.toFixed(2)}`}
                     contentStyle={{
-                      background: "#FFF8E7",
-                      border: "1px solid #B8935A",
+                      background: "var(--surface)",
+                      border: "1px solid var(--edge-line)",
                       borderRadius: 8,
                     }}
                   />
@@ -227,8 +227,8 @@ export default function Dashboard() {
                 <Tooltip
                   formatter={(v) => `₹${v.toFixed(2)}`}
                   contentStyle={{
-                    background: "#FFF8E7",
-                    border: "1px solid #B8935A",
+                    background: "var(--surface)",
+                    border: "1px solid var(--edge-line)",
                     borderRadius: 8,
                   }}
                 />
@@ -253,8 +253,8 @@ export default function Dashboard() {
                 <Tooltip
                   formatter={(v) => `₹${v.toFixed(2)}`}
                   contentStyle={{
-                    background: "#FFF8E7",
-                    border: "1px solid #B8935A",
+                    background: "var(--surface)",
+                    border: "1px solid var(--edge-line)",
                     borderRadius: 8,
                   }}
                 />
@@ -275,7 +275,7 @@ export default function Dashboard() {
             {byShop.map((s) => {
               const shop = shops.find((sh) => sh.id === s.shopId);
               return (
-                <div key={s.shopId} className="bg-bg rounded-xl p-3 sm:p-4">
+                <div key={s.shopId} className="bg-bg/45 rounded-xl p-3 sm:p-4">
                   <div className="text-xs text-ink-muted uppercase font-semibold">
                     {shop?.shortName || s.shopId}
                   </div>
@@ -302,7 +302,7 @@ export default function Dashboard() {
         ) : (
           <div className="space-y-2">
             {topFive.map((it, i) => (
-              <div key={it.name} className="flex items-center gap-3 p-3 bg-bg rounded-xl">
+              <div key={it.name} className="flex items-center gap-3 p-3 bg-bg/45 rounded-xl">
                 <div
                   className={`w-8 h-8 rounded-full flex items-center justify-center
                               text-sm font-bold flex-shrink-0 ${
@@ -338,7 +338,7 @@ export default function Dashboard() {
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
             {lowStock.slice(0, 12).map((p) => (
-              <div key={p.id} className="bg-bg rounded-lg p-3">
+              <div key={p.id} className="bg-bg/45 rounded-lg p-3">
                 <div className="font-semibold text-sm truncate">{p.name}</div>
                 <div className="text-xs text-warning font-mono mt-1">
                   {p.stock} {p.unit} left

@@ -66,7 +66,7 @@ export default function WeightModal({ open, onClose, product, onConfirm }) {
               className={`py-3 rounded-xl font-semibold text-sm transition ${
                 selected === w.value
                   ? "bg-primary text-white shadow-warm"
-                  : "bg-bg text-ink hover:bg-primary-light"
+                  : "bg-bg/45 text-ink hover:bg-primary-light"
               }`}
             >
               {w.label}
@@ -74,7 +74,7 @@ export default function WeightModal({ open, onClose, product, onConfirm }) {
           ))}
           <button
             onClick={() => { setQty(""); setSelected(null); }}
-            className="py-3 rounded-xl bg-bg text-ink hover:bg-primary-light font-semibold text-sm"
+            className="py-3 rounded-xl bg-bg/45 text-ink hover:bg-primary-light font-semibold text-sm"
           >
             Custom
           </button>

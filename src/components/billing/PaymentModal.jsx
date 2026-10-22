@@ -89,7 +89,7 @@ export default function PaymentModal({ open, onClose, total, onConfirm }) {
             className={`py-3 rounded-xl font-semibold text-xs flex flex-col items-center gap-1 transition ${
               mode === key
                 ? "bg-primary text-white shadow-warm"
-                : "bg-bg text-ink hover:bg-primary-light"
+                : "bg-bg/45 text-ink hover:bg-primary-light"
             }`}
           >
             <Icon size={20} />
@@ -115,12 +115,12 @@ export default function PaymentModal({ open, onClose, total, onConfirm }) {
           </div>
           <div className="mb-5">
             <div className="label">Quick Amounts</div>
-            <div className="grid grid-cols-5 gap-2">
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
               {QUICK_CASH.map((amt) => (
                 <button
                   key={amt}
                   onClick={() => handleQuickCash(amt)}
-                  className="py-2.5 rounded-lg bg-bg hover:bg-primary-light font-mono font-semibold text-sm transition"
+                  className="py-2.5 rounded-lg bg-bg/45 hover:bg-primary-light font-mono font-semibold text-sm transition"
                 >
                   ₹{amt}
                 </button>
@@ -128,7 +128,7 @@ export default function PaymentModal({ open, onClose, total, onConfirm }) {
             </div>
             <button
               onClick={() => handleQuickCash(total)}
-              className="w-full mt-2 py-2.5 rounded-lg bg-bg hover:bg-primary-light font-semibold text-sm transition"
+              className="w-full mt-2 py-2.5 rounded-lg bg-bg/45 hover:bg-primary-light font-semibold text-sm transition"
             >
               Exact ₹{total.toFixed(2)}
             </button>
@@ -218,7 +218,7 @@ export default function PaymentModal({ open, onClose, total, onConfirm }) {
       )}
 
       {mode === "Split" && (
-        <div className="bg-bg rounded-xl p-4 mb-4">
+        <div className="bg-bg/45 rounded-xl p-4 mb-4">
           <div className="flex justify-between text-sm mb-1">
             <span className="text-ink-muted">Entered</span>
             <span className="font-mono font-semibold">₹{paid.toFixed(2)}</span>

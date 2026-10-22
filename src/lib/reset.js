@@ -4,6 +4,7 @@
 // ============================================================
 
 import { db } from "./db";
+import { authHeaders } from "./supabaseAuth";
 import { getSupabaseUrl, getSupabaseKey } from "./supabase";
 
 // Tables to CLEAR (transactional data)
@@ -47,8 +48,7 @@ async function sbFetch(path, options = {}) {
   const res = await fetch(fullUrl, {
     ...options,
     headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
+      ...(await authHeaders()),
       "Content-Type": "application/json",
       Prefer: "return=minimal",
       ...(options.headers || {}),
@@ -78,6 +78,13 @@ const SUPABASE_TABLES = [
 // ---------- RESET LOCAL (IndexedDB) ----------
 export async function resetLocal(onProgress) {
   const results = { cleared: [], errors: [] };
+
+  // forget "already pulled full history" markers so a fresh pull is complete
+  try {
+    await db.settings.where("key").startsWith("pulledAll_").delete();
+  } catch (e) {
+    /* ignore */
+  }
 
   for (const tableName of TABLES_TO_CLEAR) {
     try {
@@ -132,8 +139,7 @@ export async function deleteAllProductImages(onProgress) {
     const listRes = await fetch(`${url}/storage/v1/object/list/product-images`, {
       method: "POST",
       headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
+        ...(await authHeaders()),
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -158,8 +164,7 @@ export async function deleteAllProductImages(onProgress) {
           {
             method: "DELETE",
             headers: {
-              apikey: key,
-              Authorization: `Bearer ${key}`,
+              ...(await authHeaders()),
             },
           }
         );

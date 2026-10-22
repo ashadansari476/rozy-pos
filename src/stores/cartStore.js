@@ -1,4 +1,7 @@
 import { create } from "zustand";
+import { useApp } from "./appStore";
+
+const currentRole = () => useApp.getState().user?.role;
 
 export const useCart = create((set, get) => ({
   items: [],
@@ -17,8 +20,7 @@ export const useCart = create((set, get) => ({
     // Stock check
     const newQty = existing ? existing.qty + qty : qty;
     if (newQty > available) {
-      const user = JSON.parse(localStorage.getItem("rozy-pos-app") || "{}")?.state?.user;
-      const role = user?.role;
+      const role = currentRole();
 
       if (role !== "owner") {
         alert(`❌ Insufficient stock\n\nAvailable: ${available} ${product.unit}\nRequested: ${newQty} ${product.unit}`);
@@ -64,8 +66,7 @@ export const useCart = create((set, get) => ({
     // Stock check
     const available = item.availableStock ?? Infinity;
     if (qty > available) {
-      const user = JSON.parse(localStorage.getItem("rozy-pos-app") || "{}")?.state?.user;
-      const role = user?.role;
+      const role = currentRole();
 
       if (role !== "owner") {
         alert(`❌ Insufficient stock\n\nAvailable: ${available} ${item.unit}\nRequested: ${qty} ${item.unit}`);
@@ -99,8 +100,9 @@ export const useCart = create((set, get) => ({
   discountAmount: () => {
     const { discount, discountType } = get();
     const sub = get().subtotal();
-    if (discountType === "percent") return (sub * discount) / 100;
-    return Math.min(discount, sub);
+    const d = Math.max(0, Number(discount) || 0);
+    if (discountType === "percent") return (sub * Math.min(d, 100)) / 100;
+    return Math.min(d, sub);
   },
 
   total: () => Math.max(0, get().subtotal() - get().discountAmount()),

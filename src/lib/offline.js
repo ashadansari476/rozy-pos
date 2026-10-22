@@ -2,6 +2,7 @@
 // Offline Utilities
 // ============================================================
 import { db } from "./db";
+import { authHeaders } from "./supabaseAuth";
 
 // ---------- Detect online/offline ----------
 export function isOnline() {
@@ -52,7 +53,7 @@ export async function probeConnection() {
 
     const key = localStorage.getItem("rozy-pos-supabase-key");
     const res = await fetch(`${url}/rest/v1/products?select=id&limit=1`, {
-      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      headers: await authHeaders(),
       signal: controller.signal,
     });
     clearTimeout(timeoutId);

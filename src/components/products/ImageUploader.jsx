@@ -99,7 +99,7 @@ export default function ImageUploader({ value, onChange, productName }) {
         </div>
       ) : (
         <div className="w-40 h-40 rounded-xl2 border-2 border-dashed border-border
-                        flex flex-col items-center justify-center text-ink-faint bg-bg">
+                        flex flex-col items-center justify-center text-ink-faint bg-bg/45">
           <Camera size={32} />
           <div className="text-xs mt-1">No image</div>
         </div>
@@ -139,7 +139,7 @@ export default function ImageUploader({ value, onChange, productName }) {
       {/* Camera modal */}
       {showCamera && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-          <div className="bg-surface rounded-xl2 p-4 max-w-md w-full">
+          <div className="bg-surface/70 rounded-xl2 p-4 max-w-md w-full">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-semibold text-primary">Take Photo</h3>
               <button

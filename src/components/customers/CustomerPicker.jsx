@@ -78,7 +78,7 @@ export default function CustomerPicker({ open, onClose, onSelect }) {
                 <button
                   key={c.id}
                   onClick={() => { onSelect(c); onClose(); }}
-                  className="w-full text-left bg-bg rounded-xl p-3 hover:bg-primary-light transition"
+                  className="w-full text-left bg-bg/45 rounded-xl p-3 hover:bg-primary-light transition"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-primary-light text-primary flex items-center justify-center flex-shrink-0">

@@ -25,7 +25,7 @@ export default function ProductImage({ product, size = "md", className = "" }) {
 
   return (
     <div
-      className={`${sizes[size]} rounded-xl bg-bg flex items-center justify-center ${className}`}
+      className={`${sizes[size]} rounded-xl bg-bg/45 flex items-center justify-center ${className}`}
     >
       {emoji}
     </div>

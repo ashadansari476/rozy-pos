@@ -81,7 +81,7 @@ export default function CompareShops() {
                   ₹{todaySales.toFixed(0)}
                 </div>
               </div>
-              <div className="bg-bg rounded-xl p-3">
+              <div className="bg-bg/45 rounded-xl p-3">
                 <div className="text-xs text-ink-muted uppercase tracking-wider">
                   Bills Today
                 </div>
@@ -126,7 +126,7 @@ export default function CompareShops() {
                 <div className="text-xs text-ink-muted uppercase tracking-wider mb-2 flex items-center gap-1">
                   <Award size={12} /> Top Item Today
                 </div>
-                <div className="bg-bg rounded-lg p-2">
+                <div className="bg-bg/45 rounded-lg p-2">
                   <div className="font-semibold text-sm">{topItem.name}</div>
                   <div className="text-xs text-ink-muted mt-0.5">
                     {topItem.qty.toFixed(2)} {topItem.unit} · ₹{topItem.revenue.toFixed(0)}

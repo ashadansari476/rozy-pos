@@ -3,28 +3,29 @@ import { useReports } from "../stores/reportStore";
 import { useApp } from "../stores/appStore";
 import { reportToCSV, downloadCSV } from "../lib/reports";
 import { Calendar, Download, FileText, Filter } from "lucide-react";
+import { localDateKey } from "../lib/dates";
 
 export default function Reports() {
   const counter = useApp((s) => s.counter);
   const { report, loading, load, range, setRange, setCustomRange } = useReports();
   const [activeTab, setActiveTab] = useState("summary");
-  const [fromDate, setFromDate] = useState(new Date().toISOString().slice(0, 10));
-  const [toDate, setToDate] = useState(new Date().toISOString().slice(0, 10));
+  const [fromDate, setFromDate] = useState(localDateKey());
+  const [toDate, setToDate] = useState(localDateKey());
 
   useEffect(() => {
     load();
   }, [counter, range]);
 
   const applyCustom = () => {
-    const from = new Date(fromDate).setHours(0, 0, 0, 0);
-    const to = new Date(toDate).setHours(23, 59, 59, 999);
+    const from = new Date(`${fromDate}T00:00:00`).getTime();
+    const to = new Date(`${toDate}T23:59:59.999`).getTime();
     setCustomRange(from, to);
   };
 
   const handleExport = () => {
     if (!report) return;
     const csv = reportToCSV(report);
-    const ts = new Date().toISOString().slice(0, 10);
+    const ts = localDateKey();
     downloadCSV(`rozy-report-${range}-${ts}.csv`, csv);
   };
 
@@ -68,7 +69,7 @@ export default function Reports() {
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
                 range === r.k
                   ? "bg-primary text-white shadow-warm"
-                  : "bg-bg text-ink hover:bg-primary-light"
+                  : "bg-bg/45 text-ink hover:bg-primary-light"
               }`}
             >
               {r.label}
@@ -109,7 +110,7 @@ export default function Reports() {
             className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition ${
               activeTab === tab.k
                 ? "bg-primary text-white shadow-warm"
-                : "bg-surface border border-border text-ink hover:bg-primary-light"
+                : "bg-surface/70 border border-border text-ink hover:bg-primary-light"
             }`}
           >
             {tab.label}
@@ -143,7 +144,7 @@ export default function Reports() {
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-bg">
+              <thead className="bg-bg/45">
                 <tr className="text-left">
                   <th className="p-3 font-semibold text-ink-muted text-xs uppercase">#</th>
                   <th className="p-3 font-semibold text-ink-muted text-xs uppercase">Item</th>
@@ -182,7 +183,7 @@ export default function Reports() {
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-bg">
+              <thead className="bg-bg/45">
                 <tr className="text-left">
                   <th className="p-3 font-semibold text-ink-muted text-xs uppercase">Category</th>
                   <th className="p-3 font-semibold text-ink-muted text-xs uppercase text-right">Qty</th>
@@ -221,7 +222,7 @@ export default function Reports() {
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-bg">
+              <thead className="bg-bg/45">
                 <tr className="text-left">
                   <th className="p-3 font-semibold text-ink-muted text-xs uppercase">Date</th>
                   <th className="p-3 font-semibold text-ink-muted text-xs uppercase text-right">Bills</th>
@@ -291,7 +292,7 @@ function PaymentRow({ label, amount, total, color }) {
           <span className="text-ink-muted">({pct.toFixed(0)}%)</span>
         </span>
       </div>
-      <div className="h-2 bg-bg rounded-full overflow-hidden">
+      <div className="h-2 bg-bg/45 rounded-full overflow-hidden">
         <div
           className={`h-full ${colorMap[color]} rounded-full transition-all`}
           style={{ width: `${pct}%` }}

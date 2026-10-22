@@ -120,7 +120,7 @@ export default function PurchaseModal({ open, onClose, products, suppliers, onSa
         </div>
 
         {items.length === 0 ? (
-          <div className="bg-bg rounded-xl p-6 text-center text-ink-muted text-sm">
+          <div className="bg-bg/45 rounded-xl p-6 text-center text-ink-muted text-sm">
             <ShoppingCart size={24} className="mx-auto mb-2 text-ink-faint" />
             Click "Add Item" to start
           </div>
@@ -130,7 +130,7 @@ export default function PurchaseModal({ open, onClose, products, suppliers, onSa
               const product = getProduct(it.productId);
               const lineTotal = (parseFloat(it.qty) || 0) * (parseFloat(it.cost) || 0);
               return (
-                <div key={idx} className="bg-bg rounded-xl p-3 space-y-2">
+                <div key={idx} className="bg-bg/45 rounded-xl p-3 space-y-2">
                   <div className="flex gap-2 items-center">
                     <select
                       className="input flex-1"

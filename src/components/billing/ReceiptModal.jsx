@@ -54,7 +54,7 @@ export default function ReceiptModal({ open, onClose, sale, onPrint }) {
         </div>
       </div>
 
-      <div className="bg-bg rounded-xl p-4 mb-5 max-h-80 overflow-y-auto">
+      <div className="bg-bg/45 rounded-xl p-4 mb-5 max-h-80 overflow-y-auto">
         <div ref={printRef} className="font-mono text-xs text-ink" style={{ width: "280px", margin: "0 auto" }}>
           <div style={{ textAlign: "center", fontWeight: "bold", fontSize: "14px" }}>
             Rozy Sweet, Snacks & Bakery

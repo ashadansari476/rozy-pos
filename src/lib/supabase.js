@@ -4,6 +4,7 @@
 // ============================================================
 
 import { db } from "./db";
+import { authHeaders } from "./supabaseAuth";
 
 const SUPABASE_URL_KEY = "rozy-pos-supabase-url";
 const SUPABASE_KEY_KEY = "rozy-pos-supabase-key";
@@ -41,8 +42,7 @@ async function sbFetch(path, options = {}) {
   const res = await fetch(fullUrl, {
     ...options,
     headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
+      ...(await authHeaders()),
       "Content-Type": "application/json",
       Prefer: "resolution=merge-duplicates,return=representation",
       ...(options.headers || {}),

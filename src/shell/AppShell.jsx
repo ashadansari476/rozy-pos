@@ -61,6 +61,22 @@ export default function AppShell() {
     }
   }, [currentShopId]);
 
+  // Log out after 60 minutes with no taps or key presses (shared counters, forgotten tablets)
+  useEffect(() => {
+    const LIMIT = 60 * 60 * 1000;
+    let last = Date.now();
+    const mark = () => { last = Date.now(); };
+    const events = ["pointerdown", "keydown", "touchstart"];
+    events.forEach((e) => window.addEventListener(e, mark, { passive: true }));
+    const timer = setInterval(() => {
+      if (Date.now() - last > LIMIT) logout();
+    }, 30000);
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, mark));
+      clearInterval(timer);
+    };
+  }, [logout]);
+
   const isOwner = user?.role === "owner";
 
   const cycleLang = () => {
@@ -73,7 +89,7 @@ export default function AppShell() {
   const availableShops = isOwner ? shops : shops.filter((s) => s.id === user?.shopId);
 
   return (
-    <div className="h-screen flex bg-bg overflow-hidden">
+    <div className="h-full flex bg-bg/45 overflow-hidden">
       {/* ============ SIDEBAR ============ */}
       <aside
         className={`${
@@ -82,8 +98,8 @@ export default function AppShell() {
             : "hidden xl:flex"
         } xl:static xl:w-64 w-64 flex-shrink-0 wood-sidebar flex-col`}
         style={{
-          height: "100vh",
-          maxHeight: "100vh",
+          height: "100%",
+          maxHeight: "100%",
           overflow: "hidden",
         }}
       >
@@ -113,8 +129,8 @@ export default function AppShell() {
               >
                 {currentShop?.shortName || "POS"}
               </div>
-              <div className="text-xs truncate" style={{ color: "#6B4423" }}>
-                {currentShop?.address || "Sukhia Pokhri"}
+              <div className="text-xs truncate" style={{ color: "var(--ink-muted)" }}>
+                {currentShop?.address || ""}
               </div>
             </div>
             <button
@@ -154,7 +170,7 @@ export default function AppShell() {
                           "linear-gradient(180deg, #8B1E1E 0%, #6B1515 100%)",
                         boxShadow:
                           "0 3px 10px rgba(107, 21, 21, 0.35), inset 0 1px 0 rgba(255,255,255,0.15)",
-                        color: "#FFF8E7",
+                        color: "var(--surface)",
                       }
                     : { color: "#3A2410" }
                 }
@@ -264,7 +280,7 @@ export default function AppShell() {
             <button
               onClick={cycleLang}
               className="px-2 sm:px-3 py-2 text-xs uppercase font-bold flex-shrink-0 rounded-lg transition hover:bg-white/15"
-              style={{ color: "#FFF8E7" }}
+              style={{ color: "var(--surface)" }}
               title="Switch language"
             >
               <Globe size={16} className="inline" />{" "}

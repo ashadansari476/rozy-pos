@@ -1,4 +1,4 @@
-import { db } from "./db";
+import { db, getDeviceTag } from "./db";
 import { pushRecord } from "./syncEngine";
 
 // Helper — get current shop ID
@@ -136,7 +136,10 @@ export async function createOrder({
   source,
 }) {
   const now = Date.now();
-  const orderNo = `ORD-${now.toString().slice(-6)}`;
+  const orderSeqRec = await db.settings.get("orderSeq");
+  const orderSeq = (orderSeqRec?.value || 0) + 1;
+  await db.settings.put({ key: "orderSeq", value: orderSeq });
+  const orderNo = `ORD-${getDeviceTag()}-${String(orderSeq).padStart(4, "0")}`;
   const shopId = getCurrentShopId();
 
   const orderId = await db.orders.add({

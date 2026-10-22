@@ -1,3 +1,4 @@
+import { deleteRemote, isSyncConfigured } from "./syncEngine";
 import { db } from "./db";
 import { hashPass } from "./users";
 
@@ -174,5 +175,16 @@ export async function updateCashier(id, updates) {
 export async function deleteCashier(id) {
   const user = await db.users.get(id);
   if (user?.role === "owner") throw new Error("Cannot delete owner");
+  // Remove from the cloud too, otherwise the cashier comes back (and can log in) after the next sync.
+  if (isSyncConfigured()) {
+    try {
+      await deleteRemote("users", id);
+    } catch (e) {
+      throw new Error(
+        "Could not remove this cashier from the cloud. Connect to the internet and try again, " +
+        "otherwise they could log in again after the next sync."
+      );
+    }
+  }
   return await db.users.delete(id);
 }

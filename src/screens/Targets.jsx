@@ -4,6 +4,7 @@ import { useApp } from "../stores/appStore";
 import { setTarget, getTodayTarget, getTargetsInRange } from "../lib/owner";
 import { db } from "../lib/db";
 import { Target, TrendingUp, Check, Plus } from "lucide-react";
+import { localDateKey } from "../lib/dates";
 
 export default function Targets() {
   const { currentShopId, shops } = useShop();
@@ -34,7 +35,7 @@ export default function Targets() {
     // History (last 30 days)
     const from = new Date();
     from.setDate(from.getDate() - 30);
-    const fromDate = from.toISOString().slice(0, 10);
+    const fromDate = localDateKey(from);
     const targets = await getTargetsInRange({
       shopId: currentShopId,
       from: fromDate,
@@ -65,7 +66,7 @@ export default function Targets() {
     if (amount <= 0) return alert("Enter valid amount");
     await setTarget({
       shopId: currentShopId,
-      date: new Date().toISOString().slice(0, 10),
+      date: localDateKey(),
       amount,
       user: user.username,
     });
@@ -111,7 +112,7 @@ export default function Targets() {
 
             {todayTarget ? (
               <>
-                <div className="h-4 bg-bg rounded-full overflow-hidden mb-3">
+                <div className="h-4 bg-bg/45 rounded-full overflow-hidden mb-3">
                   <div
                     className={`h-full rounded-full transition-all ${
                       progressPct >= 100 ? "bg-success" : progressPct >= 70 ? "bg-accent" : "bg-primary"
@@ -178,8 +179,8 @@ export default function Targets() {
         </div>
       ) : (
         <div className="card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-bg">
+          <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-sm">
+            <thead className="bg-bg/45">
               <tr className="text-left">
                 <th className="p-3 text-xs uppercase text-ink-muted font-semibold">Date</th>
                 <th className="p-3 text-xs uppercase text-ink-muted font-semibold text-right">Target</th>
@@ -215,7 +216,7 @@ export default function Targets() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
     </div>

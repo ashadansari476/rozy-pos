@@ -226,7 +226,7 @@ export default function ProductModal({ open, onClose, onSave, product, categorie
           </div>
 
           {variants.length === 0 ? (
-            <div className="text-xs text-ink-faint text-center py-3 bg-bg rounded-lg">
+            <div className="text-xs text-ink-faint text-center py-3 bg-bg/45 rounded-lg">
               No variants — product will use the price above
             </div>
           ) : (
