@@ -28,6 +28,17 @@ export async function saveSale({
   if (!Number.isFinite(total) || total < 0) {
     throw new Error("Invalid bill total");
   }
+  for (const item of items) {
+    if (!Number.isFinite(item.qty) || item.qty <= 0) {
+      throw new Error("Every sale item must have a positive quantity");
+    }
+    if (!Number.isFinite(item.price) || item.price < 0) {
+      throw new Error("Every sale item must have a valid non-negative price");
+    }
+    if (item.id == null) {
+      throw new Error("Every sale item must reference a product");
+    }
+  }
 
   const shop = shopId || getCurrentShopId();
   const ts = Date.now();
@@ -39,6 +50,29 @@ export async function saveSale({
     "rw",
     [db.sales, db.saleItems, db.shopStock, db.stockMovements, db.auditLog, db.settings],
     async () => {
+      // Validate all requested quantities before writing the sale. Missing stock rows
+      // are treated as zero, not as permission to sell without deducting inventory.
+      const requestedByProduct = new Map();
+      for (const item of items) {
+        requestedByProduct.set(
+          item.id,
+          (requestedByProduct.get(item.id) || 0) + item.qty
+        );
+      }
+      for (const [productId, requestedQty] of requestedByProduct) {
+        const stock = await db.shopStock
+          .where("[shopId+productId]")
+          .equals([shop, productId])
+          .first();
+        const available = Number.isFinite(stock?.stock) ? stock.stock : 0;
+        if (requestedQty > available) {
+          const product = await db.products.get(productId);
+          throw new Error(
+            `Insufficient stock for ${product?.name || "product"}: ${available} available, ${requestedQty} requested.`
+          );
+        }
+      }
+
       billNo = await nextBillNumber(shop);
 
       saleId = await db.sales.add({
@@ -69,6 +103,7 @@ export async function saveSale({
           unit: it.unit,
           qty: it.qty,
           price: it.price,
+          cost: Number.isFinite(it.cost) ? it.cost : 0,
           lineTotal: it.qty * it.price,
           variant: it.variant || null,
         }))
@@ -103,9 +138,11 @@ export async function saveSale({
           .where("[shopId+productId]")
           .equals([shop, it.id])
           .first();
-        if (!existing) continue;
+        // The transaction preflight above guarantees the row exists and that
+        // aggregate requested quantities do not exceed available stock.
+        if (!existing) throw new Error("Stock record disappeared during checkout");
 
-        const newStock = Math.max(0, (existing.stock || 0) - it.qty);
+        const newStock = (existing.stock || 0) - it.qty;
         await db.shopStock.update(existing.id, { stock: newStock, updatedAt: ts });
 
         pushes.push([
