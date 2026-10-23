@@ -1,5 +1,5 @@
 import { db, getDeviceTag } from "./db";
-import { pushRecord } from "./syncEngine";
+import { pushRecord, queueOperation, isSyncConfigured } from "./syncEngine";
 
 // Helper — get current shop ID
 function getCurrentShopId() {
@@ -351,11 +351,35 @@ export async function recordOrderPayment(orderId, amount, type = "balance", user
 }
 
 export async function deleteOrder(orderId) {
-  await db.orders.delete(orderId);
-  const payments = await db.payments.where("orderId").equals(orderId).toArray();
-  for (const p of payments) {
-    await db.payments.delete(p.id);
+  const order = await db.orders.get(orderId);
+  if (!order) return;
+  const shopId = getCurrentShopId();
+  if (order.shopId && order.shopId !== shopId) {
+    throw new Error("Cannot delete an order belonging to another shop");
   }
+
+  const payments = await db.payments.where("orderId").equals(orderId).toArray();
+  if (payments.length > 0 || Number(order.advanceAmount) > 0) {
+    throw new Error("This order has payment history and cannot be deleted. Cancel it and record any required refund instead.");
+  }
+
+  await db.transaction("rw", [db.orders, db.auditLog, db.syncQueue], async () => {
+    await db.orders.delete(orderId);
+    await db.auditLog.add({
+      shopId,
+      ts: Date.now(),
+      userName: "system",
+      action: "ORDER_DELETED",
+      entity: "order",
+      entityId: orderId,
+      details: { orderNo: order.orderNo },
+    });
+    if (isSyncConfigured()) {
+      await queueOperation("orders", orderId, "delete", null);
+    }
+  });
+
+  import("../stores/syncStore").then(({ useSync }) => useSync.getState().sync()).catch(() => {});
 }
 
 export async function getAllOrders({ status, from, to } = {}) {
