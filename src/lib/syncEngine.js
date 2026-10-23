@@ -543,6 +543,10 @@ export async function processQueue() {
       processed++;
     } catch (e) {
       const newRetries = (op.retries || 0) + 1;
+      // Count every failed attempt, not only operations that reached the terminal
+      // retry threshold. Otherwise fullSync could report success while work is still
+      // pending and incorrectly advance the last-successful-sync timestamp.
+      failed++;
       if (newRetries >= 5) {
         console.warn(`Sync operation retained after ${newRetries} failures: ${op.table}:${op.recordId}`);
         await db.syncQueue.update(op.id, {
@@ -551,7 +555,6 @@ export async function processQueue() {
           lastError: String(e?.message || e),
           lastAttemptAt: Date.now(),
         });
-        failed++;
       } else {
         await db.syncQueue.update(op.id, {
           status: "pending",
