@@ -390,6 +390,11 @@ export async function pullTable(tableName) {
       break;
     }
   }
+  if (needFull && !complete) {
+    // Never treat a capped/truncated first download as complete; fullSync must skip
+    // pushing this table until the initial pull can be completed successfully.
+    throw new Error(`Initial pull of ${config.supabaseTable} exceeded the safety page limit; no full-sync marker was written.`);
+  }
   if (needFull && complete) {
     await db.settings.put({ key: doneKey, value: true });
   }
