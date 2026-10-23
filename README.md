@@ -40,6 +40,19 @@ Your Supabase `id` columns must be `bigint` (or `int8`); `int4` also works becau
 3. The first sync downloads the full history; later syncs are fast.
 4. Create a cashier for that shop in Settings -> Cashiers. Cashiers are locked to their own shop.
 
+## Stock, refunds and day-end rules
+
+- **One stock number per product per shop.** Billing, Inventory, purchases, wastage, adjustments and returns all use it.
+- **Refunds:** Bills screen -> open a bill -> Refund / return items. A refund is saved as its own bill with negative amounts (RF-xx-0001), linked to the original, which is never edited. Cashiers need the owner's PIN. Items go back into stock only if you tick the box.
+- **Payments must reconcile:** UPI and card must equal the bill; cash can be more (change is given back); in split payments any change comes out of the cash part.
+- **Day-end:** expected cash = opening + cash from bills - cash refunds + cash received on orders - expenses paid from the drawer. A closed day cannot be closed again or billed into until the owner reopens it (logged).
+
+## Tests
+
+```bash
+npm test      # money, payment, refund and cash rules (no install needed beyond Node)
+```
+
 ## Known limits (read before relying on it)
 
 - **PIN and password checks run in the browser.** They stop casual use of an unlocked device, but anyone who can open the browser developer tools on that device can read its local data. Cloud data is protected by the sync account and `supabase-security.sql` above (all devices share that one account).
