@@ -1,10 +1,10 @@
 // Run with:  npm test      (uses Node's built-in test runner, nothing to install)
 import test from "node:test";
 import assert from "node:assert/strict";
-import { r2, toCents, isRefund, netCash } from "../src/lib/money.js";
-import { evaluatePayment } from "../src/lib/paymentRules.js";
-import { computeRefund, refundableLeft, itemKey } from "../src/lib/refundRules.js";
-import { computeExpectedCash } from "../src/lib/cashRules.js";
+import { r2, toCents, isRefund, netCash } from "./src/lib/money.js";
+import { evaluatePayment } from "./src/lib/paymentRules.js";
+import { computeRefund, refundableLeft, itemKey } from "./src/lib/refundRules.js";
+import { computeExpectedCash } from "./src/lib/cashRules.js";
 
 // ---------- money ----------
 test("r2 removes floating point drift", () => {
