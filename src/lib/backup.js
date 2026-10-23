@@ -52,7 +52,7 @@ export async function createBackup() {
       backup.counts[tableName] = records.length;
     } catch (e) {
       // Never present a partial export as a valid backup.
-      throw new Error(`Backup failed for ${tableName}: ${e?.message || e}`);
+      throw new Error(`Backup failed for ${tableName}: ${e?.message || e}`, { cause: e });
     }
   }
 
@@ -171,7 +171,7 @@ export async function getBackupStats() {
       const count = await db.table(tableName).count();
       stats[tableName] = count;
       totalRecords += count;
-    } catch (e) {
+    } catch {
       stats[tableName] = 0;
     }
   }
