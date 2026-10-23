@@ -60,8 +60,12 @@ export default function Orders() {
 
   const handleDelete = async (o) => {
     if (!confirm(`Delete order ${o.orderNo}?`)) return;
-    await deleteOrder(o.id);
-    setRefresh((r) => r + 1);
+    try {
+      await deleteOrder(o.id);
+      setRefresh((r) => r + 1);
+    } catch (error) {
+      alert(error?.message || "Could not delete this order.");
+    }
   };
 
   const handleStatusChange = async (orderId, status) => {
