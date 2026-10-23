@@ -86,27 +86,34 @@ export async function recordWastage({ productId, qty, reason, note, user }) {
   const cost = product.cost || 0;
   const wastageValue = cost * qty;
 
-  await adjustStock({
-    productId,
-    qty: -Math.abs(qty),
-    reason: "wastage",
-    note: reason + (note ? ` - ${note}` : ""),
-    user,
-  });
+  // Stock movement, audit entry, and wastage record must succeed or fail together.
+  // Otherwise an error could deduct stock without leaving the matching wastage record.
+  await db.transaction(
+    "rw",
+    [db.shopStock, db.stockMovements, db.auditLog, db.wastage],
+    async () => {
+      await adjustStock({
+        productId,
+        qty: -Math.abs(qty),
+        reason: "wastage",
+        note: reason + (note ? ` - ${note}` : ""),
+        user,
+      });
 
-  // Wastage log — WITH shopId and userName
-  await db.wastage.add({
-    shopId,
-    ts: Date.now(),
-    productId,
-    productName: product.name,
-    qty,
-    unit: product.unit,
-    reason,
-    note: note || "",
-    costValue: wastageValue,
-    userName: user || "system",
-  });
+      await db.wastage.add({
+        shopId,
+        ts: Date.now(),
+        productId,
+        productName: product.name,
+        qty,
+        unit: product.unit,
+        reason,
+        note: note || "",
+        costValue: wastageValue,
+        userName: user || "system",
+      });
+    }
+  );
 
   return wastageValue;
 }
@@ -128,27 +135,36 @@ export async function addBatch({ productId, qty, expiryDate, cost, batchNo, user
 
   const shopId = getCurrentShopId();
 
-  const batchId = await db.batches.add({
-    shopId,
-    productId,
-    productName: product.name,
-    qty,
-    unit: product.unit,
-    expiryDate: expiryDate || null,
-    cost: cost || product.cost || 0,
-    batchNo: batchNo || "",
-    ts: Date.now(),
-    active: true,
-  });
+  let batchId;
 
-  await adjustStock({
-    productId,
-    qty,
-    reason: "restock",
-    note: `Batch ${batchNo || batchId}`,
-    cost,
-    user,
-  });
+  // Do not leave a batch record behind if its corresponding stock adjustment fails.
+  await db.transaction(
+    "rw",
+    [db.batches, db.shopStock, db.stockMovements, db.auditLog],
+    async () => {
+      batchId = await db.batches.add({
+        shopId,
+        productId,
+        productName: product.name,
+        qty,
+        unit: product.unit,
+        expiryDate: expiryDate || null,
+        cost: cost || product.cost || 0,
+        batchNo: batchNo || "",
+        ts: Date.now(),
+        active: true,
+      });
+
+      await adjustStock({
+        productId,
+        qty,
+        reason: "restock",
+        note: `Batch ${batchNo || batchId}`,
+        cost,
+        user,
+      });
+    }
+  );
 
   return batchId;
 }
@@ -212,54 +228,78 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
   const shopId = getCurrentShopId();
   const total = items.reduce((s, it) => s + it.qty * it.cost, 0);
 
-  const purchaseId = await db.purchases.add({
-    shopId,
-    ts: Date.now(),
-    supplierId: supplierId || null,
-    supplierName: supplierName || "Unknown",
-    items: items.map((it) => ({
-      productId: it.productId,
-      productName: it.productName,
-      qty: it.qty,
-      unit: it.unit,
-      cost: it.cost,
-      lineTotal: it.qty * it.cost,
-    })),
-    total,
-    note: note || "",
-    userName: user || "system",
-  });
+  let purchaseId;
 
-  for (const it of items) {
-    await adjustStock({
-      productId: it.productId,
-      qty: it.qty,
-      reason: "restock",
-      note: `Purchase from ${supplierName || "supplier"}`,
-      cost: it.cost,
-      user,
-    });
+  // A purchase affects several tables. Commit the purchase, stock movements, stock
+  // balances, product costs, and optional expiry batches as one local transaction.
+  // If any line fails validation or a write fails, Dexie rolls back the entire purchase.
+  await db.transaction(
+    "rw",
+    [db.purchases, db.products, db.batches, db.shopStock, db.stockMovements, db.auditLog],
+    async () => {
+      // Validate every product before writing anything.
+      for (const it of items) {
+        if (!Number.isFinite(it.qty) || it.qty <= 0) {
+          throw new Error("Purchase quantities must be positive numbers");
+        }
+        if (!Number.isFinite(it.cost) || it.cost < 0) {
+          throw new Error("Purchase costs must be valid non-negative numbers");
+        }
+        if (!await db.products.get(it.productId)) {
+          throw new Error(`Product not found: ${it.productName || it.productId}`);
+        }
+      }
 
-    await db.products.update(it.productId, {
-      cost: it.cost,
-      updatedAt: Date.now(),
-    });
-
-    if (it.expiryDate) {
-      await db.batches.add({
+      purchaseId = await db.purchases.add({
         shopId,
-        productId: it.productId,
-        productName: it.productName,
-        qty: it.qty,
-        unit: it.unit,
-        expiryDate: it.expiryDate,
-        cost: it.cost,
-        batchNo: it.batchNo || "",
         ts: Date.now(),
-        active: true,
+        supplierId: supplierId || null,
+        supplierName: supplierName || "Unknown",
+        items: items.map((it) => ({
+          productId: it.productId,
+          productName: it.productName,
+          qty: it.qty,
+          unit: it.unit,
+          cost: it.cost,
+          lineTotal: it.qty * it.cost,
+        })),
+        total,
+        note: note || "",
+        userName: user || "system",
       });
+
+      for (const it of items) {
+        await adjustStock({
+          productId: it.productId,
+          qty: it.qty,
+          reason: "restock",
+          note: `Purchase from ${supplierName || "supplier"}`,
+          cost: it.cost,
+          user,
+        });
+
+        await db.products.update(it.productId, {
+          cost: it.cost,
+          updatedAt: Date.now(),
+        });
+
+        if (it.expiryDate) {
+          await db.batches.add({
+            shopId,
+            productId: it.productId,
+            productName: it.productName,
+            qty: it.qty,
+            unit: it.unit,
+            expiryDate: it.expiryDate,
+            cost: it.cost,
+            batchNo: it.batchNo || "",
+            ts: Date.now(),
+            active: true,
+          });
+        }
+      }
     }
-  }
+  );
 
   return { purchaseId, total };
 }
