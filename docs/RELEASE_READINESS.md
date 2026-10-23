@@ -75,6 +75,10 @@ The app's JSON backup is an IndexedDB/local-device backup; it is not a backup of
 - Confirm Vercel environment variables do not expose secrets to the client bundle.
 - Test health check, sign-in, checkout, sync, reload, and rollback on preview before promotion.
 
+## Sync retry ordering improvement
+
+The sync queue now coalesces queued operations by table + record ID, retaining the latest desired row state instead of replaying every stale intermediate snapshot. Direct record pushes defer to the queue when a queued operation for that same row exists, and retry operations are processed in ascending queue ID order. This reduces stale retry overwrites but does **not** replace a server-authoritative revision protocol, durable change feed, deletion tombstones, or shop-scoped RLS.
+
 ## Latest code hardening checkpoint
 
 The development branch now also includes:
