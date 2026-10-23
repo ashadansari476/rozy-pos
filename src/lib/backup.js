@@ -42,19 +42,27 @@ export async function createBackup() {
     counts: {},
   };
 
-  for (const tableName of BACKUP_TABLES) {
-    if (!db.tables.some((t) => t.name === tableName)) {
-      throw new Error(`Backup incomplete: database table "${tableName}" is missing`);
+  // Read every table in one readonly transaction so writes cannot interleave between
+  // table exports and produce a backup whose counts/relationships describe different moments.
+  const tables = BACKUP_TABLES.map((name) => {
+    if (!db.tables.some((table) => table.name === name)) {
+      throw new Error(`Backup incomplete: database table "${name}" is missing`);
     }
-    try {
-      const records = await db.table(tableName).toArray();
-      backup.data[tableName] = records;
-      backup.counts[tableName] = records.length;
-    } catch (e) {
-      // Never present a partial export as a valid backup.
-      throw new Error(`Backup failed for ${tableName}: ${e?.message || e}`, { cause: e });
+    return db.table(name);
+  });
+
+  await db.transaction("r", tables, async () => {
+    for (const tableName of BACKUP_TABLES) {
+      try {
+        const records = await db.table(tableName).toArray();
+        backup.data[tableName] = records;
+        backup.counts[tableName] = records.length;
+      } catch (e) {
+        // Never present a partial export as a valid backup.
+        throw new Error(`Backup failed for ${tableName}: ${e?.message || e}`, { cause: e });
+      }
     }
-  }
+  });
 
   return backup;
 }
@@ -90,6 +98,10 @@ export async function restoreBackup(backup, options = {}) {
   }
   if (backup.appName && backup.appName !== "Rozy POS") {
     throw new Error("This backup does not appear to belong to Rozy POS");
+  }
+  if (backup.version !== undefined &&
+      (!Number.isInteger(backup.version) || backup.version < 1 || backup.version > 1)) {
+    throw new Error(`Unsupported backup version: ${backup.version}`);
   }
 
   const availableTables = BACKUP_TABLES.filter((name) =>
