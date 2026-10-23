@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { useCustomers } from "../stores/customerStore";
 import { useProducts } from "../stores/productStore";
 import { useApp } from "../stores/appStore";
 import {
@@ -25,7 +24,6 @@ const STATUS_META = {
 export default function Orders() {
   const user = useApp((s) => s.user);
   const { products, load: loadProducts } = useProducts();
-  const { load: loadCustomers } = useCustomers();
   const [orders, setOrders] = useState([]);
   const [stats, setStats] = useState(null);
   const [filter, setFilter] = useState("all");
@@ -40,13 +38,12 @@ export default function Orders() {
   useEffect(() => {
     setNow(Date.now());
     loadProducts();
-    loadCustomers();
     (async () => {
       const [o, s] = await Promise.all([getAllOrders({}), getOrderStats()]);
       setOrders(o);
       setStats(s);
     })();
-  }, [refresh, loadProducts, loadCustomers]);
+  }, [refresh, loadProducts]);
 
   const filtered = orders.filter((o) => {
     if (filter !== "all" && o.status !== filter) return false;
