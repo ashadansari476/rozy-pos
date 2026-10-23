@@ -3,8 +3,8 @@ import { useCustomers } from "../stores/customerStore";
 import { getCustomerStats, getCustomerHistory } from "../lib/customers";
 import Modal from "../components/ui/Modal";
 import {
-  Users, Search, Plus, Phone, MapPin, User, Award, TrendingUp,
-  ShoppingCart, Calendar, Edit2, Trash2, History,
+  Users, Plus, Phone, MapPin, Award,
+  ShoppingCart, Edit2, Trash2, History,
 } from "lucide-react";
 import SearchInput from "../components/ui/SearchInput";
 
@@ -15,7 +15,7 @@ export default function Customers() {
   const [editing, setEditing] = useState(null);
   const [viewing, setViewing] = useState(null);
 
-  useEffect(() => { loadCustomers(); }, []);
+  useEffect(() => { loadCustomers(); }, [loadCustomers]);
 
   const filtered = customers.filter((c) => {
     if (!search) return true;
