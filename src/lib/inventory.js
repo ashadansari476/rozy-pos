@@ -90,7 +90,7 @@ export async function recordWastage({ productId, qty, reason, note, user }) {
   // Otherwise an error could deduct stock without leaving the matching wastage record.
   await db.transaction(
     "rw",
-    [db.shopStock, db.stockMovements, db.auditLog, db.wastage],
+    [db.products, db.shopStock, db.stockMovements, db.auditLog, db.wastage],
     async () => {
       await adjustStock({
         productId,
@@ -140,7 +140,7 @@ export async function addBatch({ productId, qty, expiryDate, cost, batchNo, user
   // Do not leave a batch record behind if its corresponding stock adjustment fails.
   await db.transaction(
     "rw",
-    [db.batches, db.shopStock, db.stockMovements, db.auditLog],
+    [db.products, db.batches, db.shopStock, db.stockMovements, db.auditLog],
     async () => {
       batchId = await db.batches.add({
         shopId,
