@@ -333,34 +333,36 @@ export async function getInventoryStats(shopId = getCurrentShopId()) {
 
 // ============ PROFIT CALCULATION ============
 
-export async function calculateProfit({ from, to }) {
-  const sales = await db.sales.toArray();
-  const saleItems = await db.saleItems.toArray();
-  const products = await db.products.toArray();
+export async function calculateProfit({ from, to, shopId = getCurrentShopId() } = {}) {
+  const [sales, saleItems, products] = await Promise.all([
+    db.sales.where("shopId").equals(shopId).toArray(),
+    db.saleItems.toArray(),
+    db.products.toArray(),
+  ]);
 
-  const productById = {};
-  for (const p of products) productById[p.id] = p;
-
+  const productById = new Map(products.map((p) => [p.id, p]));
   const filteredSales = sales.filter((s) => {
     if (from && s.ts < from) return false;
     if (to && s.ts > to) return false;
     return true;
   });
-  const saleIds = new Set(filteredSales.map((s) => s.id));
+  const saleById = new Map(filteredSales.map((s) => [s.id, s]));
 
-  let revenue = 0;
+  // Use the saved sale total so bill-level discounts are reflected in revenue.
+  // Store historical item cost at checkout; fall back to today's product cost only for
+  // legacy sales that predate that field. Refund rows have negative totals/quantities.
+  const revenue = filteredSales.reduce((sum, sale) => sum + (Number(sale.total) || 0), 0);
   let cost = 0;
 
   for (const it of saleItems) {
-    if (!saleIds.has(it.saleId)) continue;
-    revenue += it.lineTotal || it.qty * it.price;
-    const p = productById[it.productId];
-    const itemCost = (p?.cost || 0) * it.qty;
-    cost += itemCost;
+    if (!saleById.has(it.saleId)) continue;
+    const product = productById.get(it.productId);
+    const unitCost = Number.isFinite(it.cost) ? it.cost : (product?.cost || 0);
+    cost += unitCost * (Number(it.qty) || 0);
   }
 
-  const wastage = await getWastage({ from, to });
-  const wastageCost = wastage.reduce((s, w) => s + (w.costValue || 0), 0);
+  const wastage = await getWastage({ from, to, shopId });
+  const wastageCost = wastage.reduce((sum, item) => sum + (item.costValue || 0), 0);
 
   return {
     revenue,
