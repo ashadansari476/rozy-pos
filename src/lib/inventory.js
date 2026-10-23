@@ -1,3 +1,4 @@
+import { validatePurchaseItems } from "./inventoryRules";
 import { db } from "./db";
 
 // Helper — get current shop ID
@@ -226,7 +227,7 @@ export async function getAllSuppliers() {
 
 export async function recordPurchase({ supplierId, supplierName, items, note, user }) {
   const shopId = getCurrentShopId();
-  const total = items.reduce((s, it) => s + it.qty * it.cost, 0);
+  const total = validatePurchaseItems(items);
 
   let purchaseId;
 
@@ -239,12 +240,6 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
     async () => {
       // Validate every product before writing anything.
       for (const it of items) {
-        if (!Number.isFinite(it.qty) || it.qty <= 0) {
-          throw new Error("Purchase quantities must be positive numbers");
-        }
-        if (!Number.isFinite(it.cost) || it.cost < 0) {
-          throw new Error("Purchase costs must be valid non-negative numbers");
-        }
         if (!await db.products.get(it.productId)) {
           throw new Error(`Product not found: ${it.productName || it.productId}`);
         }
