@@ -49,23 +49,29 @@ async function pushShopStock(shopId, productId) {
 
 export async function addProduct(product) {
   const now = Date.now();
-  const productId = await db.products.add({
-    ...product,
-    createdAt: now,
-    updatedAt: now,
-    active: true,
-  });
-
-  // Create stock record for the current shop
   const shopId = localStorage.getItem("rozy-pos-current-shop") || "rozy";
-  await db.shopStock.add({
-    shopId,
-    productId,
-    stock: product.stock || 0,
-    lowStock: product.lowStock || 5,
+  let productId;
+
+  // Catalogue and shop-specific stock must be created together. If either write fails,
+  // roll back both so a product cannot appear without a stock row for its shop.
+  await db.transaction("rw", [db.products, db.shopStock], async () => {
+    productId = await db.products.add({
+      ...product,
+      createdAt: now,
+      updatedAt: now,
+      active: true,
+    });
+
+    await db.shopStock.add({
+      shopId,
+      productId,
+      stock: Number.isFinite(product.stock) ? product.stock : 0,
+      lowStock: Number.isFinite(product.lowStock) ? product.lowStock : 5,
+      updatedAt: now,
+    });
   });
 
-  // Push product + shopStock to cloud
+  // Push product + shopStock to cloud only after the local transaction commits.
   pushSingleProduct(productId).catch(() => {});
   pushShopStock(shopId, productId);
 
@@ -74,39 +80,44 @@ export async function addProduct(product) {
 
 export async function updateProduct(id, product) {
   const { stock, lowStock, ...rest } = product;
-  await db.products.update(id, {
-    ...rest,
-    updatedAt: Date.now(),
+  const shopId = localStorage.getItem("rozy-pos-current-shop") || "rozy";
+  const now = Date.now();
+  const stockChanged = stock !== undefined || lowStock !== undefined;
+
+  await db.transaction("rw", [db.products, db.shopStock], async () => {
+    const existingProduct = await db.products.get(id);
+    if (!existingProduct) throw new Error("Product not found");
+
+    await db.products.update(id, {
+      ...rest,
+      updatedAt: now,
+    });
+
+    if (stockChanged) {
+      const existing = await db.shopStock
+        .where("[shopId+productId]")
+        .equals([shopId, id])
+        .first();
+
+      if (existing) {
+        await db.shopStock.update(existing.id, {
+          ...(stock !== undefined ? { stock } : {}),
+          ...(lowStock !== undefined ? { lowStock } : {}),
+          updatedAt: now,
+        });
+      } else {
+        await db.shopStock.add({
+          shopId,
+          productId: id,
+          stock: Number.isFinite(stock) ? stock : 0,
+          lowStock: Number.isFinite(lowStock) ? lowStock : 5,
+          updatedAt: now,
+        });
+      }
+    }
   });
 
-  const shopId = localStorage.getItem("rozy-pos-current-shop") || "rozy";
-
-  // Update stock for current shop
-  if (stock !== undefined || lowStock !== undefined) {
-    const existing = await db.shopStock
-      .where("[shopId+productId]")
-      .equals([shopId, id])
-      .first();
-
-    if (existing) {
-      await db.shopStock.update(existing.id, {
-        ...(stock !== undefined ? { stock } : {}),
-        ...(lowStock !== undefined ? { lowStock } : {}),
-      });
-    } else {
-      await db.shopStock.add({
-        shopId,
-        productId: id,
-        stock: stock || 0,
-        lowStock: lowStock || 5,
-      });
-    }
-
-    // Push updated stock
-    pushShopStock(shopId, id);
-  }
-
-  // Push updated product to cloud
+  if (stockChanged) pushShopStock(shopId, id);
   pushSingleProduct(id).catch(() => {});
 }
 
