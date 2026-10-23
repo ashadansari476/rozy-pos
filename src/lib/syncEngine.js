@@ -579,7 +579,6 @@ export async function fullSync() {
   syncInProgress = true;
 
   try {
-    const lastSync = parseInt(localStorage.getItem("rozy-pos-last-sync") || "0");
     const results = { pushed: 0, pulled: 0, updated: 0 };
 
     const queueResult = await processQueue();
