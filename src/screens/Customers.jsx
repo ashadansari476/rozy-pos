@@ -46,7 +46,11 @@ export default function Customers() {
 
   const handleDelete = async (c) => {
     if (!confirm(`Delete customer "${c.name}"?`)) return;
-    await removeCustomer(c.id);
+    try {
+      await removeCustomer(c.id);
+    } catch (error) {
+      alert(error?.message || "Could not delete this customer.");
+    }
   };
 
   const totalSpent = customers.reduce((s, c) => s + (c.totalSpent || 0), 0);
