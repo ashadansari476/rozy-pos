@@ -145,85 +145,101 @@ export async function createOrder({
   channel,
   source,
 }) {
-  const now = Date.now();
-  const orderSeqRec = await db.settings.get("orderSeq");
-  const orderSeq = (orderSeqRec?.value || 0) + 1;
-  await db.settings.put({ key: "orderSeq", value: orderSeq });
-  const orderNo = `ORD-${getDeviceTag()}-${String(orderSeq).padStart(4, "0")}`;
-  const shopId = getCurrentShopId();
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error("An order must contain at least one item");
+  }
+  if (!Number.isFinite(totalAmount) || totalAmount < 0) {
+    throw new Error("Order total must be a valid non-negative amount");
+  }
+  const advance = advanceAmount ?? 0;
+  if (!Number.isFinite(advance) || advance < 0 || advance > totalAmount) {
+    throw new Error("Advance payment must be between zero and the order total");
+  }
+  for (const item of items) {
+    if (!item || item.productId == null || !Number.isFinite(item.qty) || item.qty <= 0 ||
+        !Number.isFinite(item.price) || item.price < 0) {
+      throw new Error("Every order item needs a product, positive quantity, and valid price");
+    }
+  }
 
-  const orderId = await db.orders.add({
-    orderNo,
-    shopId,
-    customerId: customerId || null,
-    customerName: customerName || "Walk-in",
-    customerPhone: customerPhone || "",
-    items: items.map((it) => ({
+  const now = Date.now();
+  const shopId = getCurrentShopId();
+  let orderId;
+  let orderNo;
+  let paymentId = null;
+  let orderRecord;
+  let paymentRecord = null;
+
+  // Order, advance payment, audit event and sequence are one local transaction.
+  // A failed write must not leave an order without its payment/audit record.
+  await db.transaction("rw", [db.settings, db.orders, db.payments, db.auditLog], async () => {
+    const orderSeqRec = await db.settings.get("orderSeq");
+    const orderSeq = (orderSeqRec?.value || 0) + 1;
+    await db.settings.put({ key: "orderSeq", value: orderSeq });
+    orderNo = `ORD-${getDeviceTag()}-${String(orderSeq).padStart(4, "0")}`;
+
+    const normalizedItems = items.map((it) => ({
       productId: it.productId,
       productName: it.productName,
       qty: it.qty,
       unit: it.unit,
       price: it.price,
       lineTotal: it.qty * it.price,
-    })),
-    totalAmount,
-    advanceAmount: advanceAmount || 0,
-    balanceAmount: totalAmount - (advanceAmount || 0),
-    deliveryDate: deliveryDate ? new Date(deliveryDate).getTime() : now,
-    notes: notes || "",
-    orderType: orderType || "pickup",
-    address: address || "",
-    status: "pending",
-    channel: channel || "pos",
-    source: source || "pos",
-    createdAt: now,
-    createdAtTs: now,
-    createdBy: user || "system",
-    updatedAt: now,
-  });
+    }));
 
-  if (advanceAmount > 0) {
-    await db.payments.add({
+    orderRecord = {
+      orderNo,
       shopId,
-      orderId,
-      ts: now,
-      type: "advance",
-      amount: advanceAmount,
-      note: "Advance at booking",
-    });
-  }
+      customerId: customerId || null,
+      customerName: customerName || "Walk-in",
+      customerPhone: customerPhone || "",
+      items: normalizedItems,
+      totalAmount,
+      advanceAmount: advance,
+      balanceAmount: totalAmount - advance,
+      deliveryDate: deliveryDate ? new Date(deliveryDate).getTime() : now,
+      notes: notes || "",
+      orderType: orderType || "pickup",
+      address: address || "",
+      status: "pending",
+      channel: channel || "pos",
+      source: source || "pos",
+      createdAt: now,
+      createdAtTs: now,
+      createdBy: user || "system",
+      updatedAt: now,
+    };
+    orderId = await db.orders.add(orderRecord);
+    orderRecord = { ...orderRecord, id: orderId };
 
-  await db.auditLog.add({
-    shopId,
-    ts: now,
-    userName: user || "system",
-    action: "ORDER_CREATED",
-    entity: "order",
-    entityId: orderId,
-    details: { orderNo, totalAmount, advanceAmount },
+    if (advance > 0) {
+      paymentRecord = {
+        shopId,
+        orderId,
+        ts: now,
+        type: "advance",
+        amount: advance,
+        userName: user || "system",
+        note: "Advance at booking",
+      };
+      paymentId = await db.payments.add(paymentRecord);
+      paymentRecord = { ...paymentRecord, id: paymentId };
+    }
+
+    await db.auditLog.add({
+      shopId,
+      ts: now,
+      userName: user || "system",
+      action: "ORDER_CREATED",
+      entity: "order",
+      entityId: orderId,
+      details: { orderNo, totalAmount, advanceAmount: advance },
+    });
   });
 
-  pushRecord("orders", {
-    id: orderId,
-    shopId,
-    orderNo,
-    customerId: customerId || null,
-    customerName: customerName || "Walk-in",
-    customerPhone: customerPhone || "",
-    totalAmount,
-    advanceAmount: advanceAmount || 0,
-    balanceAmount: totalAmount - (advanceAmount || 0),
-    deliveryDate: deliveryDate ? new Date(deliveryDate).getTime() : now,
-    notes: notes || "",
-    orderType: orderType || "pickup",
-    address: address || "",
-    status: "pending",
-    channel: channel || "pos",
-    source: source || "pos",
-    createdAtTs: now,
-    createdBy: user || "system",
-    updatedAt: now,
-  }).catch(() => {});
+  // Queue cloud writes only after the local transaction commits.
+  pushRecord("orders", orderRecord).catch(() => {});
+  if (paymentRecord) pushRecord("payments", paymentRecord).catch(() => {});
 
   import("../stores/syncStore").then(({ useSync }) => {
     useSync.getState().sync();
