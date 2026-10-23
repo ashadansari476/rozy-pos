@@ -59,41 +59,51 @@ export async function updateCustomer(id, data) {
 }
 
 export async function deleteCustomer(id) {
-  const customer = await db.customers.get(id);
-  if (!customer) return 0;
   const shopId = getCurrentShopId();
-  if (customer.shopId && customer.shopId !== shopId) {
-    throw new Error("Cannot delete a customer belonging to another shop");
-  }
+  let deleted = false;
 
-  const [salesCount, ordersCount] = await Promise.all([
-    db.sales.where("customerId").equals(id).count(),
-    db.orders.where("customerId").equals(id).count(),
-  ]);
-  if (salesCount > 0 || ordersCount > 0) {
-    throw new Error("This customer has sales or orders. Keep the record so transaction history remains intact.");
-  }
+  // Check transaction references and delete in the same transaction so a new order
+  // cannot race between the reference check and customer removal.
+  await db.transaction(
+    "rw",
+    [db.customers, db.sales, db.orders, db.auditLog, db.syncQueue],
+    async () => {
+      const customer = await db.customers.get(id);
+      if (!customer) return;
+      if (customer.shopId && customer.shopId !== shopId) {
+        throw new Error("Cannot delete a customer belonging to another shop");
+      }
 
-  await db.transaction("rw", [db.customers, db.auditLog, db.syncQueue], async () => {
-    await db.customers.delete(id);
-    await db.auditLog.add({
-      shopId,
-      ts: Date.now(),
-      userName: "system",
-      action: "CUSTOMER_DELETED",
-      entity: "customer",
-      entityId: id,
-      details: { customerName: customer.name },
-    });
-    if (isSyncConfigured()) {
-      await queueOperation("customers", id, "delete", null);
+      const [salesCount, ordersCount] = await Promise.all([
+        db.sales.where("customerId").equals(id).count(),
+        db.orders.where("customerId").equals(id).count(),
+      ]);
+      if (salesCount > 0 || ordersCount > 0) {
+        throw new Error("This customer has sales or orders. Keep the record so transaction history remains intact.");
+      }
+
+      await db.customers.delete(id);
+      await db.auditLog.add({
+        shopId,
+        ts: Date.now(),
+        userName: "system",
+        action: "CUSTOMER_DELETED",
+        entity: "customer",
+        entityId: id,
+        details: { customerName: customer.name },
+      });
+      if (isSyncConfigured()) {
+        await queueOperation("customers", id, "delete", null);
+      }
+      deleted = true;
     }
-  });
+  );
 
-  import("../stores/syncStore").then(({ useSync }) => useSync.getState().sync()).catch(() => {});
-  return 1;
+  if (deleted) {
+    import("../stores/syncStore").then(({ useSync }) => useSync.getState().sync()).catch(() => {});
+  }
+  return deleted ? 1 : 0;
 }
-
 export async function getAllCustomers() {
   const list = await db.customers.where("shopId").equals(getCurrentShopId()).toArray();
   return list.sort((a, b) => (b.lastVisit || 0) - (a.lastVisit || 0));
