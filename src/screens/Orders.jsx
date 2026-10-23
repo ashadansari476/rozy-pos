@@ -36,7 +36,11 @@ export default function Orders() {
   const [now, setNow] = useState(0);
 
   useEffect(() => {
-    setNow(Date.now());
+    const timer = setTimeout(() => setNow(Date.now()), 0);
+    return () => clearTimeout(timer);
+  }, [refresh]);
+
+  useEffect(() => {
     loadProducts();
     (async () => {
       const [o, s] = await Promise.all([getAllOrders({}), getOrderStats()]);
