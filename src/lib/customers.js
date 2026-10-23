@@ -274,6 +274,7 @@ export async function recordOrderPayment(orderId, amount, type = "balance", user
     ts: now,
     type,
     amount,
+    userName: user || "system",
     note: type === "balance" ? "Balance payment" : "Additional payment",
   });
 }
