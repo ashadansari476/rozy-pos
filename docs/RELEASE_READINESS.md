@@ -75,6 +75,20 @@ The app's JSON backup is an IndexedDB/local-device backup; it is not a backup of
 - Confirm Vercel environment variables do not expose secrets to the client bundle.
 - Test health check, sign-in, checkout, sync, reload, and rollback on preview before promotion.
 
+## Latest code hardening checkpoint
+
+The development branch now also includes:
+- Atomic local writes for product + per-shop stock.
+- Atomic purchase, batch, and wastage inventory updates.
+- Shop-scoped customer search/lookup/reports and order listing/statistics.
+- Order creation and payment writes grouped with payment/audit records in local transactions.
+- Guard against deleting an order with payment history; unpaid order deletions are audited and queued for cloud deletion.
+- A consistent readonly local backup snapshot and backup-format version validation.
+- Pure purchase validation with dedicated unit tests.
+- Final queue-count check to avoid reporting sync success while concurrent queued work remains.
+
+CI passed for commit `954670fbf1f315b654bf1a5725451021d6da0000`: unit tests, strict lint of selected critical modules, and production build passed. Full-project lint remains non-blocking. This does not validate live Supabase sync, cloud RLS, or actual backup restore.
+
 ## Product decisions now confirmed
 
 The owner has confirmed multiple shops, multiple devices, owner/cashier roles, India as the initial market, and reliability as the top priority. See [`MULTI_SHOP_ARCHITECTURE.md`](./MULTI_SHOP_ARCHITECTURE.md) for the proposed data boundaries, role model, sync contract, India-market tax requirements, and regression test matrix. This is a design specification; the controls are not all implemented yet.
