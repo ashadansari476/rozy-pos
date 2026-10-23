@@ -217,6 +217,7 @@ const LOCAL_ONLY_FIELDS = [
   "counter",           // old field, replaced by shopId
   "product_name",      // duplicated field
   "customer",          // old field, use customerId
+  "syncedAt",          // local marker: this category has been synced before
 ];
 
 // ---------- Table-specific local-only fields ----------
@@ -224,6 +225,10 @@ const LOCAL_ONLY_FIELDS = [
 const TABLE_LOCAL_ONLY = {
   // products table: stock lives in shop_stock, not products
   products: ["stock", "lowStock", "low_stock"],
+  // kept on this device only (the cloud tables have no such column): how an order payment was made,
+  // and whether an expense was paid out of the cash drawer. Used for the day-end cash check.
+  payments: ["mode"],
+  expenses: ["paidFrom"],
 };
 
 // ---------- Field converters ----------
@@ -394,32 +399,73 @@ export async function pullTable(tableName, sinceTs) {
   let pulled = 0;
   let updated = 0;
 
-  // SPECIAL HANDLING: Categories sync by NAME to prevent duplicates
+  // SPECIAL HANDLING: categories are matched by NAME, and every device keeps the SAME id as the cloud.
+  // (Older versions gave each device its own id for a pulled category and then pushed it back,
+  //  so every device and every delete added another copy of the category in the cloud.)
   if (tableName === "categories") {
-    const localCategories = await db.categories.toArray();
-    const localByName = {};
-    for (const c of localCategories) {
-      localByName[c.name.toLowerCase().trim()] = c;
-    }
-    const cloudByName = new Set();
+    const norm = (n) => (n || "").toLowerCase().trim();
+
+    // 1. Cloud: group rows by name. If a name exists more than once, keep the lowest id and delete the rest.
+    const groups = new Map();
     for (const r of remote) {
-      cloudByName.add((r.name || "").toLowerCase().trim());
+      const k = norm(r.name);
+      if (!k) continue;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r);
     }
-    // Delete local categories that no longer exist in cloud
-    for (const c of localCategories) {
-      if (!cloudByName.has(c.name.toLowerCase().trim())) {
-        await db.categories.delete(c.id);
+    const canonical = [];
+    for (const rows of groups.values()) {
+      rows.sort((x, y) => x.id - y.id);
+      canonical.push(rows[0]);
+      for (const extra of rows.slice(1)) {
+        try {
+          await sbFetch(`/categories?id=eq.${encodeURIComponent(extra.id)}`, { method: "DELETE" });
+        } catch (e) {
+          /* tried again at the next sync */
+        }
       }
     }
-    // Add cloud categories that don't exist locally
-    for (const r of remote) {
-      const key = (r.name || "").toLowerCase().trim();
-      if (!localByName[key]) {
-        await db.categories.add({
-          name: r.name,
-          icon: r.icon || "📦",
-          sortOrder: r.sort_order || 0,
-        });
+    const cloudNames = new Set(canonical.map((r) => norm(r.name)));
+
+    // 2. Local: remove duplicates, and remove categories that were deleted on another device.
+    //    Only categories that have been synced before (syncedAt) can count as "deleted elsewhere";
+    //    a brand-new category that has not been pushed yet must survive until it is pushed.
+    const seen = new Set();
+    for (const c of await db.categories.toArray()) {
+      const k = norm(c.name);
+      if (seen.has(k) || (c.syncedAt && !cloudNames.has(k))) {
+        await db.categories.delete(c.id);
+      } else {
+        seen.add(k);
+      }
+    }
+
+    // 3. Make local rows use the cloud id for each name.
+    const localNow = await db.categories.toArray();
+    for (const r of canonical) {
+      const k = norm(r.name);
+      const row = {
+        id: r.id,
+        name: r.name,
+        icon: r.icon || "📦",
+        sortOrder: r.sort_order || 0,
+        syncedAt: Date.now(),
+      };
+      const sameId = localNow.find((c) => c.id === r.id);
+      if (sameId) {
+        if (sameId.name !== row.name || sameId.icon !== row.icon || (sameId.sortOrder || 0) !== row.sortOrder || !sameId.syncedAt) {
+          await db.categories.put(row);
+          updated++;
+        }
+        continue;
+      }
+      const sameName = localNow.find((c) => norm(c.name) === k);
+      if (sameName) {
+        await db.categories.delete(sameName.id);
+        await db.categories.put({ ...row, icon: r.icon || sameName.icon || "📦" });
+        updated++;
+      } else {
+        await db.categories.put(row);
         pulled++;
       }
     }
@@ -455,6 +501,12 @@ export async function deleteRemote(tableName, id) {
   if (!config) throw new Error(`Unknown table ${tableName}`);
   if (!isOnline()) throw new Error("You are offline");
   await sbFetch(`/${config.supabaseTable}?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// Removes EVERY cloud row with this category name (old duplicates included), so none can bring it back.
+export async function deleteCategoryRemote(name) {
+  if (!isOnline()) throw new Error("You are offline");
+  await sbFetch(`/categories?name=ilike.${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
 // ---------- SINGLE PUSH ----------
@@ -533,6 +585,8 @@ export async function processQueue() {
     try {
       if (op.action === "delete") {
         await deleteRemote(op.table, op.recordId);
+      } else if (op.action === "deleteByName") {
+        await deleteCategoryRemote(op.data?.name || "");
       } else {
         await pushTable(op.table, [op.data]);
       }
@@ -593,6 +647,9 @@ export async function fullSync() {
             try {
               await pushTable(table.name, chunk);
               results.pushed += chunk.length;
+              if (table.name === "categories") {
+                await db.categories.bulkUpdate(chunk.map((c) => ({ key: c.id, changes: { syncedAt: Date.now() } })));
+              }
             } catch (e) {
               console.warn(`Push failed for ${table.name} chunk:`, e.message);
             }

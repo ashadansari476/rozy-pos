@@ -11,7 +11,7 @@ export const ROLES = {
     label: "Owner",
     // Pages accessible
     pages: [
-  "billing", "dashboard", "day-end", "compare",
+  "billing", "bills", "dashboard", "day-end", "compare",
   "products", "inventory", "suppliers",
   "customers", "orders", "reports",
   "expenses", "targets", "audit", "settings",
@@ -35,7 +35,7 @@ export const ROLES = {
     label: "Cashier",
     // Limited pages
     pages: [
-      "billing", "inventory", "orders", "customers",
+      "billing", "bills", "inventory", "orders", "customers",
     ],
     canSwitchShops: false,
     canSeeFinancials: false, // No cost/margin/profit

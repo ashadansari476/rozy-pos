@@ -16,6 +16,7 @@ export default function OrderModal({ open, onClose, products, editingOrder, onSa
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
   const [advance, setAdvance] = useState("");
+  const [advanceMode, setAdvanceMode] = useState("Cash");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -95,6 +96,7 @@ export default function OrderModal({ open, onClose, products, editingOrder, onSa
         }),
         totalAmount: total,
         advanceAmount: parseFloat(advance) || 0,
+        advanceMode,
         deliveryDate,
         orderType,
         address,
@@ -295,6 +297,16 @@ export default function OrderModal({ open, onClose, products, editingOrder, onSa
               onChange={(e) => setAdvance(e.target.value)}
               placeholder="0"
             />
+            <select
+              aria-label="Advance paid by"
+              className="w-full bg-transparent text-xs text-ink-muted text-center mt-1 focus:outline-none"
+              value={advanceMode}
+              onChange={(e) => setAdvanceMode(e.target.value)}
+            >
+              <option value="Cash">paid in Cash</option>
+              <option value="UPI">paid by UPI</option>
+              <option value="Card">paid by Card</option>
+            </select>
           </div>
           <div className="bg-warning/10 rounded-xl p-3 text-center">
             <div className="text-xs text-ink-muted uppercase">Balance</div>

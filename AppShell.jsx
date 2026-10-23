@@ -5,8 +5,7 @@ import { useTranslation } from "react-i18next";
 import {
   ShoppingCart, LayoutDashboard, Package, Boxes, Truck, Users,
   ClipboardList, BarChart3, Wallet, Target, FileText, Settings,
-  LogOut, Menu, X, Globe, Store, Calculator,
-} from "lucide-react";
+  LogOut, Menu, X, Globe, Store, Calculator, Receipt } from "lucide-react";
 import { useState, useEffect } from "react";
 import { scheduleOrderAlerts } from "../lib/orderAlerts";
 import SyncIndicator from "../components/ui/SyncIndicator";
@@ -17,6 +16,7 @@ import BackupReminder from "../components/ui/BackupReminder";
 
 const NAV = [
   { to: "/billing",   icon: ShoppingCart,    key: "billing" },
+  { to: "/bills",     icon: Receipt,         key: "bills" },
   { to: "/dashboard", icon: LayoutDashboard, key: "dashboard" },
   { to: "/day-end",   icon: Calculator,      key: "day_end" },
   { to: "/compare",   icon: Store,           key: "compare", ownerOnly: true },

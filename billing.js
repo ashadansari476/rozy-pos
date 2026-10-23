@@ -1,6 +1,10 @@
 import { db, getDeviceTag } from "./db";
 import { pushRecord } from "./syncEngine";
-import { netCash } from "./money";
+import { netCash, isRefund } from "./money";
+import { evaluatePayment } from "./paymentRules";
+import { computeRefund } from "./refundRules";
+import { applyStockChange } from "./inventory";
+import { localDateKey } from "./dates";
 
 // Helper — get current shop ID
 function getCurrentShopId() {
@@ -19,15 +23,27 @@ export async function saveSale({
   subtotal,
   discount,
   total,
-  payment,
+  payment: paymentInput,
   customer,
 }) {
+  let payment = paymentInput;
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error("Cannot save an empty bill");
   }
   if (!Number.isFinite(total) || total < 0) {
     throw new Error("Invalid bill total");
   }
+
+  // The payment must cover the bill and reconcile (cash kept + UPI + card = total).
+  const check = evaluatePayment({
+    mode: payment?.mode,
+    cash: payment?.cash,
+    upi: payment?.upi,
+    card: payment?.card,
+    total,
+  });
+  if (!check.ok) throw new Error(check.error || "The payment does not cover the bill");
+  payment = check.payment;
 
   const shop = shopId || getCurrentShopId();
   const ts = Date.now();
@@ -37,8 +53,14 @@ export async function saveSale({
 
   await db.transaction(
     "rw",
-    [db.sales, db.saleItems, db.shopStock, db.stockMovements, db.auditLog, db.settings],
+    [db.sales, db.saleItems, db.shopStock, db.stockMovements, db.auditLog, db.settings, db.cashDrawer],
     async () => {
+      // Once the owner/cashier has closed the cash day, no more bills until it is reopened
+      const drawer = await db.cashDrawer.where("[shopId+date]").equals([shop, localDateKey()]).first();
+      if (drawer?.closedAt) {
+        throw new Error("Today's cash day is closed. Ask the owner to reopen it before billing.");
+      }
+
       billNo = await nextBillNumber(shop);
 
       saleId = await db.sales.add({
@@ -159,6 +181,177 @@ export async function saveSale({
   return { saleId, billNo, ts };
 }
 
+// ============ REFUND / RETURN ============
+// A refund is stored as its own bill with NEGATIVE amounts and quantities, linked to the original
+// bill (payment.refundOf). The original bill is never edited or deleted, so the history stays
+// complete and every report (sales, cash, profit, items) nets out automatically.
+
+export async function getRefundsForSale(saleId) {
+  const sale = await db.sales.get(saleId);
+  if (!sale) return [];
+  const shop = sale.shopId || sale.counter;
+  const refunds = await db.sales
+    .where("shopId").equals(shop)
+    .filter((s) => s.payment?.refundOf === saleId)
+    .toArray();
+  const out = [];
+  for (const r of refunds) {
+    const items = await db.saleItems.where("saleId").equals(r.id).toArray();
+    out.push({ ...r, items });
+  }
+  return out;
+}
+
+export async function saveRefund({ saleId, selections, method, reason, restock, user, approvedBy }) {
+  if (!["Cash", "UPI", "Card"].includes(method)) throw new Error("Choose how the money is returned");
+  if (!reason || !reason.trim()) throw new Error("Enter a reason for the refund");
+
+  const pushes = [];
+  let result;
+
+  await db.transaction(
+    "rw",
+    [db.sales, db.saleItems, db.products, db.shopStock, db.stockMovements, db.auditLog, db.settings, db.cashDrawer],
+    async () => {
+      const sale = await db.sales.get(saleId);
+      if (!sale) throw new Error("Bill not found");
+      if (isRefund(sale)) throw new Error("A refund bill cannot be refunded again");
+
+      const shop = sale.shopId || sale.counter;
+      const ts = Date.now();
+
+      const drawer = await db.cashDrawer.where("[shopId+date]").equals([shop, localDateKey()]).first();
+      if (drawer?.closedAt) {
+        throw new Error("Today's cash day is closed. Ask the owner to reopen it before refunding.");
+      }
+
+      const items = await db.saleItems.where("saleId").equals(saleId).toArray();
+      const earlier = await db.sales
+        .where("shopId").equals(shop)
+        .filter((s) => s.payment?.refundOf === saleId)
+        .toArray();
+      const priorRefunds = [];
+      for (const r of earlier) {
+        priorRefunds.push({
+          total: r.total,
+          items: await db.saleItems.where("saleId").equals(r.id).toArray(),
+        });
+      }
+
+      const calc = computeRefund({ sale, saleItems: items, priorRefunds, selections });
+      if (!calc.ok) throw new Error(calc.error);
+      const total = calc.total;
+
+      const seqKey = `refundSeq_${shop}`;
+      const seqRec = await db.settings.get(seqKey);
+      const seq = (seqRec?.value || 0) + 1;
+      await db.settings.put({ key: seqKey, value: seq });
+      const billNo = `RF-${getDeviceTag()}-${String(seq).padStart(4, "0")}`;
+
+      const payment = {
+        mode: "Refund",
+        refundOf: saleId,
+        originalBillNo: sale.billNo,
+        method,
+        cash: method === "Cash" ? -total : 0,
+        upi: method === "UPI" ? -total : 0,
+        card: method === "Card" ? -total : 0,
+        paid: -total,
+        change: 0,
+        reason: reason.trim(),
+        restock: !!restock,
+        approvedBy: approvedBy || user || null,
+      };
+
+      const refundId = await db.sales.add({
+        shopId: shop,
+        billNo,
+        counter: shop,
+        cashier: user,
+        ts,
+        subtotal: -total,
+        discount: 0,
+        total: -total,
+        payment,
+        customer: null,
+        customerId: sale.customerId || null,
+        customerName: sale.customerName || null,
+        customerPhone: sale.customerPhone || null,
+        channel: "refund",
+        source: "refund",
+        tax: 0,
+        updatedAt: ts,
+      });
+
+      await db.saleItems.bulkAdd(
+        calc.lines.map((l) => ({
+          saleId: refundId,
+          productId: l.productId,
+          name: l.name,
+          unit: l.unit,
+          qty: -l.qty,
+          price: l.price,
+          lineTotal: -l.amount,
+          variant: l.variant,
+        }))
+      );
+
+      pushes.push([
+        "sales",
+        {
+          id: refundId, shopId: shop, billNo, ts, cashier: user,
+          subtotal: -total, discount: 0, tax: 0, total: -total, payment,
+          customerId: sale.customerId || null,
+          customerName: sale.customerName || null,
+          customerPhone: sale.customerPhone || null,
+          channel: "refund", source: "refund", updatedAt: ts, createdAt: ts,
+        },
+      ]);
+
+      // Put the goods back into THIS shop's stock (only when the owner says they are resellable)
+      if (restock) {
+        for (const l of calc.lines) {
+          const product = await db.products.get(l.productId);
+          if (!product) continue;
+          const r = await applyStockChange({
+            shopId: shop,
+            product,
+            qty: l.qty,
+            reason: "return",
+            note: `Refund ${billNo} of ${sale.billNo}`,
+            user,
+          });
+          pushes.push(r.push);
+        }
+      }
+
+      await db.auditLog.add({
+        shopId: shop,
+        ts,
+        userName: user || "system",
+        action: "REFUND_CREATED",
+        entity: "sale",
+        entityId: refundId,
+        details: {
+          billNo, originalBillNo: sale.billNo, total, method,
+          reason: reason.trim(), restock: !!restock, approvedBy: approvedBy || user,
+        },
+      });
+
+      result = { refundId, billNo, total };
+    }
+  );
+
+  for (const [table, record] of pushes) {
+    pushRecord(table, record).catch(() => {});
+  }
+  import("../stores/syncStore")
+    .then(({ useSync }) => useSync.getState().sync())
+    .catch(() => {});
+
+  return result;
+}
+
 // ============ BILL NUMBER ============
 
 export async function nextBillNumber(shopId) {
@@ -190,11 +383,11 @@ export async function getTodayStats(counter) {
 
   const all = await db.sales.where("ts").aboveOrEqual(startTs).toArray();
   const sales = counter && counter !== "Both"
-    ? all.filter((s) => s.counter === counter)
+    ? all.filter((s) => (s.shopId || s.counter) === counter)
     : all;
 
   const total = sales.reduce((sum, s) => sum + (s.total || 0), 0);
-  const count = sales.length;
+  const count = sales.filter((s) => !isRefund(s)).length;
   const cash = sales.reduce((sum, s) => sum + netCash(s), 0);
   const upi = sales.reduce((sum, s) => sum + (s.payment?.upi || 0), 0);
   const card = sales.reduce((sum, s) => sum + (s.payment?.card || 0), 0);

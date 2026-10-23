@@ -11,6 +11,7 @@ export default function ExpenseModal({ open, onClose, expense, onSaved }) {
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("other");
   const [note, setNote] = useState("");
+  const [paidFrom, setPaidFrom] = useState("drawer");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -19,10 +20,12 @@ export default function ExpenseModal({ open, onClose, expense, onSaved }) {
         setAmount(String(expense.amount || ""));
         setCategory(expense.category || "other");
         setNote(expense.note || "");
+        setPaidFrom(expense.paidFrom || "drawer");
       } else {
         setAmount("");
         setCategory("other");
         setNote("");
+        setPaidFrom("drawer");
       }
     }
   }, [open, expense]);
@@ -34,13 +37,14 @@ export default function ExpenseModal({ open, onClose, expense, onSaved }) {
     setSaving(true);
     try {
       if (expense) {
-        await updateExpense(expense.id, { amount: amt, category, note });
+        await updateExpense(expense.id, { amount: amt, category, note, paidFrom });
       } else {
         await addExpense({
           shopId: currentShopId,
           amount: amt,
           category,
           note,
+          paidFrom,
           user: user.username,
         });
       }
@@ -95,6 +99,16 @@ export default function ExpenseModal({ open, onClose, expense, onSaved }) {
         </div>
 
         <div>
+          <label className="label" htmlFor="exp-paid-from">Paid from</label>
+          <select
+            id="exp-paid-from"
+            className="input mb-4"
+            value={paidFrom}
+            onChange={(e) => setPaidFrom(e.target.value)}
+          >
+            <option value="drawer">Cash drawer (reduces expected cash at day-end)</option>
+            <option value="other">Other (UPI, bank or own pocket)</option>
+          </select>
           <label className="label">Note (optional)</label>
           <input
             className="input"

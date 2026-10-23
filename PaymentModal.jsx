@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import Modal from "../ui/Modal";
+import { evaluatePayment } from "../../lib/paymentRules";
 import { Banknote, Smartphone, CreditCard, SplitSquareHorizontal, Check } from "lucide-react";
 
 const QUICK_CASH = [100, 200, 500, 1000, 2000];
@@ -9,6 +10,7 @@ export default function PaymentModal({ open, onClose, total, onConfirm }) {
   const [cash, setCash] = useState("");
   const [upi, setUpi] = useState("");
   const [card, setCard] = useState("");
+  const [submitted, setSubmitted] = useState(false); // stops a double tap from saving the bill twice
 
   // Auto-fill UPI/Card with total when mode changes
   useEffect(() => {
@@ -25,35 +27,27 @@ export default function PaymentModal({ open, onClose, total, onConfirm }) {
       setCash("");
       setUpi("");
       setCard("");
+      setSubmitted(false);
     }
   }, [open]);
 
-  const cashNum = parseFloat(cash) || 0;
-  const upiNum = parseFloat(upi) || 0;
-  const cardNum = parseFloat(card) || 0;
-
-  const paid =
-    mode === "Cash" ? cashNum :
-    mode === "UPI" ? upiNum :
-    mode === "Card" ? cardNum :
-    cashNum + upiNum + cardNum;
-
-  const change = Math.max(0, paid - total);
-  const remaining = Math.max(0, total - paid);
-  const canConfirm = paid >= total && total > 0;
+  // All payment rules live in lib/paymentRules.js (and are covered by automated tests)
+  const ev = evaluatePayment({
+    mode,
+    cash: parseFloat(cash) || 0,
+    upi: parseFloat(upi) || 0,
+    card: parseFloat(card) || 0,
+    total,
+  });
+  const { paid, change, remaining } = ev;
+  const canConfirm = ev.ok && !submitted;
 
   const handleQuickCash = (amt) => setCash(String(amt));
 
   const confirm = () => {
-    const payment = {
-      mode,
-      cash: mode === "Cash" ? cashNum : mode === "Split" ? cashNum : 0,
-      upi: mode === "UPI" ? upiNum : mode === "Split" ? upiNum : 0,
-      card: mode === "Card" ? cardNum : mode === "Split" ? cardNum : 0,
-      paid,
-      change: mode === "Split" ? 0 : change,
-    };
-    onConfirm(payment);
+    if (!ev.ok || submitted) return;
+    setSubmitted(true);
+    onConfirm(ev.payment);
   };
 
   const modes = [
@@ -217,6 +211,12 @@ export default function PaymentModal({ open, onClose, total, onConfirm }) {
         </div>
       )}
 
+      {ev.error && (
+        <div className="rounded-xl p-3 mb-4 text-sm text-danger bg-danger/10" role="alert">
+          {ev.error}
+        </div>
+      )}
+
       {mode === "Split" && (
         <div className="bg-bg/45 rounded-xl p-4 mb-4">
           <div className="flex justify-between text-sm mb-1">
@@ -229,6 +229,12 @@ export default function PaymentModal({ open, onClose, total, onConfirm }) {
               ₹{remaining.toFixed(2)}
             </span>
           </div>
+          {change > 0 && (
+            <div className="flex justify-between text-sm mt-1">
+              <span className="text-ink-muted">Change to return (from cash)</span>
+              <span className="font-mono font-semibold text-success">₹{change.toFixed(2)}</span>
+            </div>
+          )}
         </div>
       )}
 

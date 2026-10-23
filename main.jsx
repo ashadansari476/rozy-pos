@@ -23,7 +23,24 @@ import { bootstrapSettings, migrateExistingDataToRozy } from "./lib/db";
     window.addEventListener("load", () => {
       navigator.serviceWorker
         .register("/sw.js")
-        .then(() => console.log("✅ Service Worker registered"))
+        .then((reg) => {
+          console.log("✅ Service Worker registered");
+          // look for a new version when the app is reopened and every 30 minutes
+          const check = () => reg.update().catch(() => {});
+          document.addEventListener("visibilitychange", () => {
+            if (!document.hidden) check();
+          });
+          setInterval(check, 30 * 60 * 1000);
+          // tell the user when a new version has been downloaded
+          reg.addEventListener("updatefound", () => {
+            const worker = reg.installing;
+            worker?.addEventListener("statechange", () => {
+              if (worker.state === "installed" && navigator.serviceWorker.controller) {
+                window.dispatchEvent(new Event("rozy-update-ready"));
+              }
+            });
+          });
+        })
         .catch((err) => console.warn("SW registration failed:", err));
     });
   }

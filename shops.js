@@ -1,3 +1,4 @@
+import { isRefund } from "./money";
 import { deleteRemote, isSyncConfigured } from "./syncEngine";
 import { db } from "./db";
 import { hashPass } from "./users";
@@ -129,7 +130,7 @@ export async function getShopStats(shopId) {
 
   return {
     productCount: stock.length,
-    salesCount: sales.length,
+    salesCount: sales.filter((x) => !isRefund(x)).length,
     totalSales,
     totalStockValue,
     customerCount: customers.length,

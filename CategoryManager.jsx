@@ -36,7 +36,7 @@ export default function CategoryManager({ open, onClose, categories, onAdd, onUp
         <label className="label">Add New Category</label>
         <div className="flex gap-2">
           <select
-            className="input w-20 text-center"
+            className="input !w-16 shrink-0 !px-1 text-center"
             value={newIcon}
             onChange={(e) => setNewIcon(e.target.value)}
           >
@@ -47,7 +47,7 @@ export default function CategoryManager({ open, onClose, categories, onAdd, onUp
             ))}
           </select>
           <input
-            className="input flex-1"
+            className="input flex-1 min-w-0"
             placeholder="Category name"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
@@ -68,7 +68,7 @@ export default function CategoryManager({ open, onClose, categories, onAdd, onUp
             {editingId === cat.id ? (
               <>
                 <select
-                  className="input w-20 text-center"
+                  className="input !w-16 shrink-0 !px-1 text-center"
                   value={editIcon}
                   onChange={(e) => setEditIcon(e.target.value)}
                 >
@@ -79,7 +79,7 @@ export default function CategoryManager({ open, onClose, categories, onAdd, onUp
                   ))}
                 </select>
                 <input
-                  className="input flex-1"
+                  className="input flex-1 min-w-0"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   autoFocus

@@ -3,6 +3,7 @@ import { useApp } from "./stores/appStore";
 import Login from "./screens/Login";
 import AppShell from "./shell/AppShell";
 import Billing from "./screens/Billing";
+import Bills from "./screens/Bills";
 import Dashboard from "./screens/Dashboard";
 import Products from "./screens/Products";
 import Placeholder from "./screens/Placeholder";
@@ -24,6 +25,7 @@ import ThemePreview from "./screens/ThemePreview";
 import Backup from "./screens/Backup";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import ToastContainer from "./components/ui/Toast";
+import UpdateBanner from "./components/ui/UpdateBanner";
 
 export default function App() {
   const user = useApp((s) => s.user);
@@ -32,6 +34,7 @@ export default function App() {
       <>
         <Login />
         <ToastContainer />
+        <UpdateBanner />
       </>
     );
   }
@@ -39,12 +42,14 @@ export default function App() {
   return (
     <>
     <ToastContainer />
+    <UpdateBanner />
     <Routes>
       <Route element={<AppShell />}>
         <Route path="/" element={<Navigate to="/billing" replace />} />
 
         {/* Cashier accessible */}
         <Route path="/billing" element={<ProtectedRoute pageKey="billing"><Billing /></ProtectedRoute>} />
+        <Route path="/bills" element={<ProtectedRoute pageKey="bills"><Bills /></ProtectedRoute>} />
         <Route path="/products" element={<ProtectedRoute pageKey="products"><Products /></ProtectedRoute>} />
         <Route path="/inventory" element={<ProtectedRoute pageKey="inventory"><Inventory /></ProtectedRoute>} />
         <Route path="/customers" element={<ProtectedRoute pageKey="customers"><Customers /></ProtectedRoute>} />

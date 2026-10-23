@@ -1,6 +1,7 @@
 import { db } from "./db";
 import { localDateKey } from "./dates";
-import { netCash } from "./money";
+import { netCash, isRefund, r2 } from "./money";
+import { computeExpectedCash } from "./cashRules";
 
 // ============ CASH RECONCILIATION ============
 
@@ -19,6 +20,10 @@ export async function getTodayCash(shopId) {
 export async function startDay({ shopId, openingCash, user }) {
   const date = todayKey();
   const existing = await getTodayCash(shopId);
+
+  if (existing?.closedAt) {
+    throw new Error("Today's cash day is already closed. The owner can reopen it from Day End.");
+  }
 
   if (existing) {
     await db.cashDrawer.update(existing.id, {
@@ -58,6 +63,12 @@ export async function endDay({ shopId, closingCash, user, notes }) {
   const date = todayKey();
   const record = await getTodayCash(shopId);
   if (!record) throw new Error("Day was not started");
+  if (record.closedAt) {
+    throw new Error("This day is already closed. The owner can reopen it from Day End.");
+  }
+  if (!Number.isFinite(closingCash) || closingCash < 0) {
+    throw new Error("Enter the cash counted in the drawer");
+  }
 
   // Get today's sales for this shop
   const startOfDay = new Date();
@@ -68,14 +79,17 @@ export async function endDay({ shopId, closingCash, user, notes }) {
   const sales = await db.sales.where("shopId").equals(shopId).toArray();
   const todaySales = sales.filter((s) => s.ts >= startTs && s.ts < endTs);
 
-  // Cash sales only
-  let cashSales = 0;
-  for (const s of todaySales) {
-    cashSales += netCash(s);
-  }
-
-  const expectedCash = (record.openingCash || 0) + cashSales;
-  const difference = closingCash - expectedCash;
+  // Expected cash = opening + cash kept from bills - cash refunds + cash received on orders
+  //                 - expenses paid from the drawer   (see lib/cashRules.js, covered by tests)
+  const orderCashIn = await getOrderCashIn(shopId, startTs, endTs);
+  const drawerExpenses = await getDrawerExpenses(shopId, startTs, endTs);
+  const { expectedCash, cashFromBills: cashSales } = computeExpectedCash({
+    openingCash: record.openingCash || 0,
+    sales: todaySales,
+    orderCashIn,
+    drawerExpenses,
+  });
+  const difference = r2(closingCash - expectedCash);
 
   await db.cashDrawer.update(record.id, {
     closingCash,
@@ -92,10 +106,61 @@ export async function endDay({ shopId, closingCash, user, notes }) {
     action: "DAY_ENDED",
     entity: "cashDrawer",
     entityId: record.id,
-    details: { openingCash: record.openingCash, closingCash, expectedCash, difference },
+    details: {
+      openingCash: record.openingCash, closingCash, expectedCash, difference,
+      cashSales, orderCashIn, drawerExpenses,
+    },
   });
 
-  return { expectedCash, difference, cashSales, billsCount: todaySales.length };
+  return {
+    expectedCash, difference, cashSales, orderCashIn, drawerExpenses,
+    billsCount: todaySales.filter((s) => !isRefund(s)).length,
+  };
+}
+
+// Cash received on orders today (advances, balances, delivery payments).
+// A payment with no recorded method counts as cash (older data).
+async function getOrderCashIn(shopId, startTs, endTs) {
+  const all = await db.payments.toArray();
+  return all
+    .filter(
+      (p) =>
+        (!p.shopId || p.shopId === shopId) &&
+        p.ts >= startTs && p.ts < endTs &&
+        (p.mode || "Cash") === "Cash"
+    )
+    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+}
+
+// Expenses paid out of the cash drawer today (default: drawer, unless marked otherwise).
+async function getDrawerExpenses(shopId, startTs, endTs) {
+  const all = await db.expenses.where("shopId").equals(shopId).toArray();
+  return all
+    .filter((e) => e.ts >= startTs && e.ts < endTs && (e.paidFrom || "drawer") === "drawer")
+    .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+}
+
+/** Owner only: reopen today's closed cash day (for example to fix a wrong count). Logged. */
+export async function reopenDay({ shopId, user, reason }) {
+  const record = await getTodayCash(shopId);
+  if (!record || !record.closedAt) throw new Error("Today is not closed");
+  await db.cashDrawer.update(record.id, {
+    closingCash: null, closedAt: null, closedBy: null,
+    expectedCash: null, difference: null,
+  });
+  await logAudit({
+    shopId,
+    user,
+    action: "DAY_REOPENED",
+    entity: "cashDrawer",
+    entityId: record.id,
+    details: {
+      reason: reason || "",
+      previousClosing: record.closingCash,
+      previousExpected: record.expectedCash,
+      previousDifference: record.difference,
+    },
+  });
 }
 
 // ============ EXPENSES ============
@@ -111,11 +176,12 @@ export const EXPENSE_CATEGORIES = [
   { key: "other", label: "Other", icon: "📝" },
 ];
 
-export async function addExpense({ shopId, amount, category, note, user }) {
+export async function addExpense({ shopId, amount, category, note, user, paidFrom }) {
   const id = await db.expenses.add({
     shopId,
     amount,
     category,
+    paidFrom: paidFrom || "drawer", // "drawer" = paid from the cash drawer, "other" = UPI / bank / own pocket
     note: note || "",
     user,
     ts: Date.now(),
@@ -254,6 +320,8 @@ export async function buildDayEndSummary({ shopId, date }) {
   const todaySales = sales.filter((s) => s.ts >= dayStart && s.ts < dayEnd);
   const totalSales = todaySales.reduce((s, x) => s + (x.total || 0), 0);
   const totalDiscount = todaySales.reduce((s, x) => s + (x.discount || 0), 0);
+  const refundBills = todaySales.filter(isRefund);
+  const refundTotal = r2(refundBills.reduce((s, x) => s + Math.abs(x.total || 0), 0));
 
   // Payment split
   const payment = { cash: 0, upi: 0, card: 0 };
@@ -315,7 +383,9 @@ export async function buildDayEndSummary({ shopId, date }) {
   return {
     date,
     shopId,
-    billCount: todaySales.length,
+    billCount: todaySales.length - refundBills.length,
+    refundCount: refundBills.length,
+    refundTotal,
     totalSales,
     totalDiscount,
     payment,

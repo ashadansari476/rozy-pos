@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useInventory } from "../stores/inventoryStore";
 import { useApp } from "../stores/appStore";
+import { useShop } from "../stores/shopStore";
 import StockAdjustModal from "../components/inventory/StockAdjustModal";
 import WastageModal from "../components/inventory/WastageModal";
 import ExpiryBadge from "../components/inventory/ExpiryBadge";
@@ -23,9 +24,12 @@ export default function Inventory() {
   const [wasting, setWasting] = useState(null);
   const [tab, setTab] = useState("stock"); // stock | movements | wastage | expiry
 
+  const { currentShopId } = useShop();
+
+  // reload whenever the shop changes, so each shop always sees its own stock
   useEffect(() => {
     loadAll();
-  }, []);
+  }, [currentShopId]);
 
   const filtered = products.filter((p) => {
     if (search) {

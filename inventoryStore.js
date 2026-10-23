@@ -3,7 +3,9 @@ import {
   getInventoryStats, getMovements, getWastage, getExpiringBatches,
   getExpiredBatches, getAllSuppliers, getPurchases, calculateProfit,
 } from "../lib/inventory";
-import { db } from "../lib/db";
+import { getProductsWithStock } from "../lib/products";
+
+const currentShop = () => localStorage.getItem("rozy-pos-current-shop") || "rozy";
 
 export const useInventory = create((set, get) => ({
   products: [],
@@ -22,7 +24,7 @@ export const useInventory = create((set, get) => ({
     const [
       products, stats, movements, expiring, expired, suppliers, profit,
     ] = await Promise.all([
-      db.products.toArray(),
+      getProductsWithStock(currentShop()), // this shop's stock: the same number billing sells from
       getInventoryStats(),
       getMovements({ limit: 200 }),
       getExpiringBatches(3),

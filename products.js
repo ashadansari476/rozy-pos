@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { pushSingleProduct } from "./supabase";
-import { pushRecord, isSyncConfigured, deleteRemote, queueOperation } from "./syncEngine";
+import { pushRecord, isSyncConfigured, deleteRemote, deleteCategoryRemote, queueOperation } from "./syncEngine";
 
 // ============ PRODUCTS ============
 
@@ -68,6 +68,20 @@ export async function addProduct(product) {
   // Push product + shopStock to cloud
   pushSingleProduct(productId).catch(() => {});
   pushShopStock(shopId, productId);
+
+  // The other shops get their own stock record starting at 0, so their sales deduct from
+  // THEIR stock (before, a shop without a record silently skipped stock tracking).
+  try {
+    const { getAllShops } = await import("./shops");
+    const shops = await getAllShops();
+    for (const sh of shops) {
+      if (sh.id === shopId) continue;
+      await db.shopStock.add({ shopId: sh.id, productId, stock: 0, lowStock: product.lowStock || 5 });
+      pushShopStock(sh.id, productId);
+    }
+  } catch (e) {
+    console.warn("Could not create stock records for other shops:", e.message);
+  }
 
   return productId;
 }
@@ -155,6 +169,15 @@ export async function updateCategory(id, data) {
 }
 
 export async function deleteCategory(id) {
+  const cat = await db.categories.get(id);
+  // Delete in the cloud too (all copies by name). Offline: remember it and send it at the next sync.
+  if (cat && isSyncConfigured()) {
+    try {
+      await deleteCategoryRemote(cat.name);
+    } catch (e) {
+      await queueOperation("categories", id, "deleteByName", { name: cat.name });
+    }
+  }
   return await db.categories.delete(id);
 }
 

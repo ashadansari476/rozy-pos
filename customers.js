@@ -130,6 +130,7 @@ export async function createOrder({
   orderType,
   address,
   advanceAmount,
+  advanceMode,
   totalAmount,
   user,
   channel,
@@ -178,6 +179,7 @@ export async function createOrder({
       orderId,
       ts: now,
       type: "advance",
+      mode: advanceMode || "Cash",
       amount: advanceAmount,
       note: "Advance at booking",
     });
@@ -244,7 +246,7 @@ export async function updateOrderStatus(orderId, status, user) {
   pushRecord("orders", { id: orderId, status, updatedAt: now }).catch(() => {});
 }
 
-export async function recordOrderPayment(orderId, amount, type = "balance", user) {
+export async function recordOrderPayment(orderId, amount, type = "balance", user, mode = "Cash") {
   const order = await db.orders.get(orderId);
   if (!order) return;
 
@@ -263,6 +265,7 @@ export async function recordOrderPayment(orderId, amount, type = "balance", user
     orderId,
     ts: now,
     type,
+    mode,
     amount,
     note: type === "balance" ? "Balance payment" : "Additional payment",
   });
@@ -418,6 +421,7 @@ export async function completeOrder({
       orderId,
       ts: now,
       type: "balance",
+      mode: paymentMode || "Cash",
       amount: paymentAmount,
       note: `Paid at delivery · ${paymentMode}`,
     });

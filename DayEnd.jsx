@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useShop } from "../stores/shopStore";
 import { useApp } from "../stores/appStore";
 import {
-  getTodayCash, startDay, endDay,
+  getTodayCash, startDay, endDay, reopenDay,
   buildDayEndSummary, formatSummaryText, todayKeyForUI,
 } from "../lib/owner";
 import {
@@ -39,24 +39,45 @@ export default function DayEnd() {
 
   const handleStartDay = async () => {
     const amount = parseFloat(openingInput) || 0;
-    await startDay({ shopId: currentShopId, openingCash: amount, user: user.username });
+    try {
+      await startDay({ shopId: currentShopId, openingCash: amount, user: user.username });
+    } catch (e) {
+      return alert(e.message);
+    }
     setOpeningInput("");
     setModal(null);
     await load();
   };
 
   const handleEndDay = async () => {
-    const amount = parseFloat(closingInput) || 0;
-    await endDay({
-      shopId: currentShopId,
-      closingCash: amount,
-      user: user.username,
-      notes,
-    });
+    if (closingInput.trim() === "") return alert("Enter the cash you counted in the drawer");
+    const amount = parseFloat(closingInput);
+    try {
+      await endDay({
+        shopId: currentShopId,
+        closingCash: amount,
+        user: user.username,
+        notes,
+      });
+    } catch (e) {
+      return alert(e.message);
+    }
     setClosingInput("");
     setNotes("");
     setModal(null);
     await load();
+  };
+
+  // Owner only: reopen a closed day (for example, to correct a wrong cash count). It is logged.
+  const handleReopen = async () => {
+    const reason = prompt("Why are you reopening today? (for the audit log)");
+    if (reason === null) return;
+    try {
+      await reopenDay({ shopId: currentShopId, user: user.username, reason });
+      await load();
+    } catch (e) {
+      alert(e.message);
+    }
   };
 
   const handleShareWhatsApp = async () => {
@@ -174,6 +195,12 @@ export default function DayEnd() {
                   </div>
                 </div>
 
+                {user?.role === "owner" && (
+                  <button onClick={handleReopen} className="btn-outline w-full">
+                    <Unlock size={16} /> Reopen today (owner)
+                  </button>
+                )}
+
                 {drawer.notes && (
                   <div className="bg-bg/45 rounded-xl p-3 text-xs">
                     <b>Notes:</b> {drawer.notes}
@@ -206,6 +233,9 @@ export default function DayEnd() {
           <Row label="💵 Cash" value={`₹${summary.payment.cash.toFixed(2)}`} />
           <Row label="📱 UPI" value={`₹${summary.payment.upi.toFixed(2)}`} />
           <Row label="💳 Card" value={`₹${summary.payment.card.toFixed(2)}`} />
+          {summary.refundCount > 0 && (
+            <Row label={`↩ Refunds (${summary.refundCount}) already deducted`} value={`₹${summary.refundTotal.toFixed(2)}`} />
+          )}
         </div>
       </div>
 
