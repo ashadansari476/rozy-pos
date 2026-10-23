@@ -567,6 +567,9 @@ export async function completeOrder({
         const stock = stockByProduct.get(item.productId);
         const newStock = stock.stock - item.qty;
         await db.shopStock.update(stock.id, { stock: newStock, updatedAt: now });
+        // Keep the in-memory balance in step with the transaction so repeated lines
+        // for the same product deduct cumulatively rather than from the original balance.
+        stockByProduct.set(item.productId, { ...stock, stock: newStock, updatedAt: now });
         stockPushes.push({
           id: stock.id,
           shopId,
