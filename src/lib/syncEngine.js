@@ -466,7 +466,15 @@ export async function deleteRemote(tableName, id) {
 // ---------- SINGLE PUSH ----------
 export async function pushRecord(tableName, record) {
   if (!isSyncConfigured()) return;
-  if (!isOnline()) {
+
+  // If an earlier write for this row is queued, update the queued snapshot instead
+  // of letting a direct upload race with an older retry and get overwritten later.
+  const queuedForRecord = await db.syncQueue
+    .where("table")
+    .equals(tableName)
+    .and((op) => String(op.recordId) === String(record.id))
+    .count();
+  if (queuedForRecord > 0 || !isOnline()) {
     await queueOperation(tableName, record.id, "upsert", record);
     return;
   }
@@ -513,14 +521,29 @@ async function flushBatch() {
 
 // ---------- QUEUE ----------
 export async function queueOperation(tableName, recordId, action, data) {
-  await db.syncQueue.add({
-    table: tableName,
-    recordId,
-    action,
-    data,
-    status: "pending",
-    createdAt: Date.now(),
-    retries: 0,
+  // The queue stores the latest desired state for each row, not a history of every
+  // intermediate snapshot. Coalescing prevents an older failed upsert from replaying
+  // after a newer update and restoring stale cloud data.
+  await db.transaction("rw", db.syncQueue, async () => {
+    const existing = await db.syncQueue
+      .where("table")
+      .equals(tableName)
+      .and((op) => String(op.recordId) === String(recordId))
+      .toArray();
+
+    if (existing.length) {
+      await db.syncQueue.bulkDelete(existing.map((op) => op.id));
+    }
+
+    await db.syncQueue.add({
+      table: tableName,
+      recordId,
+      action,
+      data,
+      status: "pending",
+      createdAt: Date.now(),
+      retries: 0,
+    });
   });
 }
 
@@ -530,9 +553,10 @@ export async function processQueue() {
   // Retry pending operations and previously failed operations. Failed operations are
   // retained locally for inspection/retry: silently deleting them can lose sales,
   // stock movements, refunds, or other records that never reached the cloud.
-  const pending = await db.syncQueue.where("status").equals("pending").toArray();
-  const previouslyFailed = await db.syncQueue.where("status").equals("failed").toArray();
-  const operations = [...pending, ...previouslyFailed];
+  const operations = [
+    ...(await db.syncQueue.where("status").equals("pending").toArray()),
+    ...(await db.syncQueue.where("status").equals("failed").toArray()),
+  ].sort((a, b) => a.id - b.id);
 
   let processed = 0;
   let failed = 0;
