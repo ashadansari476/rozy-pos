@@ -25,7 +25,7 @@ jobs:
       - name: Run unit tests
         run: npm test
       - name: Lint critical modules changed in Phase 1
-        run: npx eslint src/lib/billing.js src/lib/inventory.js src/lib/products.js src/lib/customers.js src/lib/syncEngine.js src/lib/backup.js src/lib/db.js src/stores/inventoryStore.js src/stores/syncStore.js money-rules.test.js
+        run: npx eslint src/lib/billing.js src/lib/inventory.js src/lib/inventoryRules.js src/lib/products.js src/lib/customers.js src/lib/syncEngine.js src/lib/backup.js src/lib/db.js src/stores/inventoryStore.js src/stores/syncStore.js money-rules.test.js inventory-rules.test.js
       - name: Full-project lint baseline (known debt)
         run: npm run lint
         continue-on-error: true
