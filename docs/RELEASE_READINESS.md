@@ -87,7 +87,7 @@ The development branch now also includes:
 - Pure purchase validation with dedicated unit tests.
 - Final queue-count check to avoid reporting sync success while concurrent queued work remains.
 
-CI passed for commit `954670fbf1f315b654bf1a5725451021d6da0000`: unit tests, strict lint of selected critical modules, and production build passed. Full-project lint remains non-blocking. This does not validate live Supabase sync, cloud RLS, or actual backup restore.
+CI passed for commit `ae3b0f160640c52f88f604c2561adae5c60561e9`: unit tests, strict lint of selected critical modules, and production build passed. The automated suite has 29 tests for payment/refund/cash rules and pure purchase/backup validation. Full-project lint remains non-blocking. This does not validate live Supabase sync, cloud RLS, IndexedDB transaction rollback under browser faults, or actual backup restore.
 
 ## Product decisions now confirmed
 
