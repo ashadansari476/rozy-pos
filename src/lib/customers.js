@@ -543,9 +543,11 @@ export async function completeOrder({
         total: order.totalAmount,
         payment: {
           mode: paymentMode,
-          cash: paymentMode === "Cash" ? totalPaid : 0,
-          upi: paymentMode === "UPI" ? totalPaid : 0,
-          card: paymentMode === "Card" ? totalPaid : 0,
+          // The order's advance was already recorded as order cash-in; only count
+          // the amount received at delivery here to avoid double-counting the advance.
+          cash: paymentMode === "Cash" ? receivedAtDelivery : 0,
+          upi: paymentMode === "UPI" ? receivedAtDelivery : 0,
+          card: paymentMode === "Card" ? receivedAtDelivery : 0,
           paid: totalPaid,
           change,
         },
