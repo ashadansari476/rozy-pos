@@ -4,12 +4,12 @@ import { useProducts } from "../stores/productStore";
 import { useApp } from "../stores/appStore";
 import {
   getAllOrders, getOrderStats, updateOrderStatus,
-  deleteOrder, recordOrderPayment, completeOrder,
+  deleteOrder, completeOrder,
 } from "../lib/customers";
 import OrderModal from "../components/orders/OrderModal";
 import Modal from "../components/ui/Modal";
 import {
-  ClipboardList, Plus, Search, Clock, CheckCircle,
+  ClipboardList, Plus, Clock, CheckCircle,
   AlertTriangle, Calendar, User, Phone, Trash2,
 } from "lucide-react";
 import SearchInput from "../components/ui/SearchInput";
@@ -25,7 +25,7 @@ const STATUS_META = {
 export default function Orders() {
   const user = useApp((s) => s.user);
   const { products, load: loadProducts } = useProducts();
-  const { loadOrders } = useCustomers();
+  const { load: loadCustomers } = useCustomers();
   const [orders, setOrders] = useState([]);
   const [stats, setStats] = useState(null);
   const [filter, setFilter] = useState("all");
@@ -35,15 +35,18 @@ export default function Orders() {
   const [viewing, setViewing] = useState(null);
   const [refresh, setRefresh] = useState(0);
   const [delivering, setDelivering] = useState(null);
+  const [now, setNow] = useState(0);
 
   useEffect(() => {
+    setNow(Date.now());
+    loadProducts();
+    loadCustomers();
     (async () => {
-      loadProducts();
       const [o, s] = await Promise.all([getAllOrders({}), getOrderStats()]);
       setOrders(o);
       setStats(s);
     })();
-  }, [refresh]);
+  }, [refresh, loadProducts, loadCustomers]);
 
   const filtered = orders.filter((o) => {
     if (filter !== "all" && o.status !== filter) return false;
@@ -184,7 +187,7 @@ export default function Orders() {
             {filtered.map((o) => {
               const meta = STATUS_META[o.status] || STATUS_META.pending;
               const Icon = meta.icon;
-              const overdue = o.status === "pending" && o.deliveryDate < Date.now();
+              const overdue = o.status === "pending" && o.deliveryDate < now;
               return (
                 <div key={o.id} className="card p-4">
                   <div className="flex items-start gap-3 mb-3">
