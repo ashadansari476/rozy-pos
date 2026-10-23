@@ -1,5 +1,11 @@
 -- ============================================================
--- Rozy POS: lock the cloud database so only the signed-in sync account can use it.
+-- UNSAFE LEGACY TEST SCRIPT — DO NOT RUN FOR PRODUCTION OR MULTI-SHOP DATA.
+--
+-- This script grants every authenticated session access to every row in the listed
+-- tables (USING/WITH CHECK true). It does NOT isolate shops or enforce owner/cashier
+-- permissions. The app's shared sync account makes that limitation especially serious.
+-- Use only in a disposable, isolated test project if you understand this limitation.
+-- A production setup requires individual identities, shop membership, and tested RLS.
 --
 -- BEFORE running this:
 --   1. Supabase -> Authentication -> Users -> "Add user": create ONE email + password
