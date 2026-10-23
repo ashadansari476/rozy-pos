@@ -34,6 +34,9 @@ If the preview environment or Supabase project cannot be confirmed, stop before 
 
 ### Sales and stock
 - [ ] Create synthetic product and stock records for Shop A and Shop B.
+- [ ] Simulate a failed local write where possible and verify product creation cannot leave a product without its shop-stock record.
+- [ ] Record a multi-line purchase with a deliberately invalid line and confirm the entire purchase is rejected without changing any stock.
+- [ ] Record batch intake and wastage; verify the batch/wastage record, stock balance, stock movement and audit entry stay consistent.
 - [ ] Complete a cash sale and verify bill total, change, sale record and stock deduction.
 - [ ] Complete a UPI sale and verify the amount recorded.
 - [ ] Try a zero, negative, invalid and over-stock quantity; confirm rejection.
@@ -42,6 +45,9 @@ If the preview environment or Supabase project cannot be confirmed, stop before 
 - [ ] Verify discount calculations and saved sale total agree.
 
 ### Refunds and cash
+- [ ] Create an advance order with an advance payment, deliver it with a balance payment, and reconcile that the advance is not counted twice in drawer cash.
+- [ ] Try to delete an order with payment history; confirm deletion is blocked and the order/payment history remains.
+- [ ] Try to delete a customer linked to sales/orders; confirm deletion is blocked so historical records remain.
 - [ ] Refund part of a synthetic sale; verify the amount and returned stock policy.
 - [ ] Attempt to refund more than sold; confirm rejection.
 - [ ] Retry the same refund action and check for duplicate financial effect.
@@ -76,6 +82,7 @@ If cross-shop access is possible, stop testing and report a security failure. Do
 ### Backup, migration and rollback
 - [ ] Export the local Rozy POS JSON backup and confirm it includes all expected tables/counts.
 - [ ] Restore that backup into a separate browser profile and compare counts/relationships.
+- [ ] Verify a future/unsupported backup version and mismatched table count are rejected before any data is changed.
 - [ ] Try a malformed and incomplete backup; verify it is rejected without changing existing local data.
 - [ ] Export/backup the Supabase test database and restore it into a separate test project.
 - [ ] Run schema migration against a disposable copy and verify pre/post counts.
