@@ -378,8 +378,9 @@ export async function pullTable(tableName, sinceTs) {
       `/${config.supabaseTable}?select=*&limit=${PAGE}&offset=${offset}&order=id.desc`
     );
     if (!Array.isArray(page)) {
-      if (offset === 0) return { pulled: 0, updated: 0 };
-      break;
+      // A malformed/failed response is not an empty table. Throw so fullSync can mark
+      // this table as failed and avoid pushing a stale local copy over the cloud.
+      throw new Error(`Unexpected response while pulling ${config.supabaseTable}`);
     }
     remote = remote.concat(page);
     if (page.length < PAGE) {
@@ -580,9 +581,12 @@ export async function fullSync() {
     const lastSync = parseInt(localStorage.getItem("rozy-pos-last-sync") || "0");
     const results = { pushed: 0, pulled: 0, updated: 0 };
 
-    await processQueue();
+    const queueResult = await processQueue();
 
     const errors = [];
+    if (queueResult.failed > 0) {
+      errors.push(`${queueResult.failed} queued sync operation(s) still failing; they were retained for retry.`);
+    }
     const pullFailedTables = new Set();
 
     // Pull first. If a table cannot be read, do not push this device's potentially stale
