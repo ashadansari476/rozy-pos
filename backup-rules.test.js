@@ -19,7 +19,7 @@ test("valid complete backup returns tables to restore", () => {
 });
 
 test("backup with a missing required table is rejected for replacement restore", () => {
-  const backup = { ...valid, data: { products: [], sales: [] } };
+  const backup = { ...valid, data: { products: [], sales: [] }, counts: { products: 0, sales: 0 } };
   assert.throws(() => validateBackupForRestore(backup, tables), /missing the "shopStock" table/);
 });
 
