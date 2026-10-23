@@ -43,13 +43,16 @@ export async function createBackup() {
   };
 
   for (const tableName of BACKUP_TABLES) {
+    if (!db.tables.some((t) => t.name === tableName)) {
+      throw new Error(`Backup incomplete: database table "${tableName}" is missing`);
+    }
     try {
-      if (!db.tables.some((t) => t.name === tableName)) continue;
       const records = await db.table(tableName).toArray();
       backup.data[tableName] = records;
       backup.counts[tableName] = records.length;
     } catch (e) {
-      console.warn(`Backup failed for ${tableName}:`, e.message);
+      // Never present a partial export as a valid backup.
+      throw new Error(`Backup failed for ${tableName}: ${e?.message || e}`);
     }
   }
 
@@ -82,42 +85,55 @@ export function downloadBackup(backup) {
 export async function restoreBackup(backup, options = {}) {
   const { merge = false } = options;
 
-  if (!backup || !backup.data) {
-    throw new Error("Invalid backup file");
+  if (!backup || typeof backup !== "object" || !backup.data || typeof backup.data !== "object" || Array.isArray(backup.data)) {
+    throw new Error("Invalid backup file: expected a Rozy POS backup with a data object");
+  }
+  if (backup.appName && backup.appName !== "Rozy POS") {
+    throw new Error("This backup does not appear to belong to Rozy POS");
   }
 
-  const results = {};
-
-  for (const tableName of BACKUP_TABLES) {
-    if (!backup.data[tableName]) continue;
-    if (!db.tables.some((t) => t.name === tableName)) continue;
-
+  const availableTables = BACKUP_TABLES.filter((name) =>
+    db.tables.some((table) => table.name === name)
+  );
+  for (const tableName of availableTables) {
     const records = backup.data[tableName];
-    const table = db.table(tableName);
-
-    try {
+    if (records === undefined) {
       if (!merge) {
-        // Clear existing
-        await table.clear();
+        throw new Error(`Cannot replace local data: backup is missing the "${tableName}" table. Use a complete backup.`);
       }
-      // Insert records
-      for (const record of records) {
-        try {
-          await table.put(record);
-        } catch (e) {
-          console.warn(`Skipped record in ${tableName}:`, e.message);
-        }
-      }
-      results[tableName] = records.length;
-    } catch (e) {
-      console.warn(`Restore failed for ${tableName}:`, e.message);
-      results[tableName] = 0;
+      continue;
+    }
+    if (!Array.isArray(records) || records.some((record) => !record || typeof record !== "object" || Array.isArray(record))) {
+      throw new Error(`Invalid backup: "${tableName}" must contain an array of records`);
+    }
+    if (backup.counts && backup.counts[tableName] !== undefined && backup.counts[tableName] !== records.length) {
+      throw new Error(`Invalid backup: record count for "${tableName}" does not match`);
     }
   }
 
+  const tablesToRestore = availableTables.filter((name) => Array.isArray(backup.data[name]));
+  const results = {};
+
+  // Validate first, then apply all table changes atomically. If one write fails, Dexie
+  // rolls back the transaction instead of leaving a half-restored database.
+  await db.transaction("rw", tablesToRestore.map((name) => db.table(name)), async () => {
+    if (!merge) {
+      for (const tableName of tablesToRestore) {
+        await db.table(tableName).clear();
+      }
+    }
+
+    for (const tableName of tablesToRestore) {
+      const records = backup.data[tableName];
+      if (records.length) {
+        await db.table(tableName).bulkPut(records);
+      }
+      results[tableName] = records.length;
+    }
+  });
+
   return results;
 }
-
 // ---------- FILE PICKER ----------
 export function pickBackupFile() {
   return new Promise((resolve, reject) => {
