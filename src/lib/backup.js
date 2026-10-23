@@ -4,6 +4,7 @@
 // ============================================================
 
 import { db } from "./db";
+import { validateBackupForRestore } from "./backupRules";
 
 // All tables to backup (order matters for restore — parent tables first)
 export const BACKUP_TABLES = [
@@ -93,37 +94,10 @@ export function downloadBackup(backup) {
 export async function restoreBackup(backup, options = {}) {
   const { merge = false } = options;
 
-  if (!backup || typeof backup !== "object" || !backup.data || typeof backup.data !== "object" || Array.isArray(backup.data)) {
-    throw new Error("Invalid backup file: expected a Rozy POS backup with a data object");
-  }
-  if (backup.appName && backup.appName !== "Rozy POS") {
-    throw new Error("This backup does not appear to belong to Rozy POS");
-  }
-  if (backup.version !== undefined &&
-      (!Number.isInteger(backup.version) || backup.version < 1 || backup.version > 1)) {
-    throw new Error(`Unsupported backup version: ${backup.version}`);
-  }
-
   const availableTables = BACKUP_TABLES.filter((name) =>
     db.tables.some((table) => table.name === name)
   );
-  for (const tableName of availableTables) {
-    const records = backup.data[tableName];
-    if (records === undefined) {
-      if (!merge) {
-        throw new Error(`Cannot replace local data: backup is missing the "${tableName}" table. Use a complete backup.`);
-      }
-      continue;
-    }
-    if (!Array.isArray(records) || records.some((record) => !record || typeof record !== "object" || Array.isArray(record))) {
-      throw new Error(`Invalid backup: "${tableName}" must contain an array of records`);
-    }
-    if (backup.counts && backup.counts[tableName] !== undefined && backup.counts[tableName] !== records.length) {
-      throw new Error(`Invalid backup: record count for "${tableName}" does not match`);
-    }
-  }
-
-  const tablesToRestore = availableTables.filter((name) => Array.isArray(backup.data[name]));
+  const tablesToRestore = validateBackupForRestore(backup, availableTables, { merge });
   const results = {};
 
   // Validate first, then apply all table changes atomically. If one write fails, Dexie
