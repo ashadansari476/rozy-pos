@@ -10,7 +10,9 @@ function getCurrentShopId() {
 
 export async function addCustomer({ name, phone, address, notes, birthday }) {
   const now = Date.now();
+  const shopId = getCurrentShopId();
   const id = await db.customers.add({
+    shopId,
     name: name.trim(),
     phone: (phone || "").trim(),
     address: (address || "").trim(),
@@ -25,6 +27,7 @@ export async function addCustomer({ name, phone, address, notes, birthday }) {
 
   pushRecord("customers", {
     id,
+    shopId,
     name: name.trim(),
     phone: (phone || "").trim(),
     address: (address || "").trim(),
@@ -42,8 +45,12 @@ export async function addCustomer({ name, phone, address, notes, birthday }) {
 
 export async function updateCustomer(id, data) {
   const now = Date.now();
-  const result = await db.customers.update(id, { ...data, updatedAt: now });
-  pushRecord("customers", { id, ...data, updatedAt: now }).catch(() => {});
+  const existing = await db.customers.get(id);
+  if (!existing) return 0;
+  const shopId = existing.shopId || getCurrentShopId();
+  const safeData = { ...data, shopId, updatedAt: now };
+  const result = await db.customers.update(id, safeData);
+  pushRecord("customers", { id, ...existing, ...safeData }).catch(() => {});
   return result;
 }
 
@@ -52,19 +59,19 @@ export async function deleteCustomer(id) {
 }
 
 export async function getAllCustomers() {
-  const list = await db.customers.toArray();
+  const list = await db.customers.where("shopId").equals(getCurrentShopId()).toArray();
   return list.sort((a, b) => (b.lastVisit || 0) - (a.lastVisit || 0));
 }
 
 export async function findCustomerByPhone(phone) {
   if (!phone) return null;
   const clean = phone.replace(/\D/g, "");
-  const all = await db.customers.toArray();
-  return all.find((c) => c.phone.replace(/\D/g, "").endsWith(clean)) || null;
+  const all = await db.customers.where("shopId").equals(getCurrentShopId()).toArray();
+  return all.find((c) => (c.phone || "").replace(/\D/g, "").endsWith(clean)) || null;
 }
 
 export async function searchCustomers(query) {
-  const all = await db.customers.toArray();
+  const all = await db.customers.where("shopId").equals(getCurrentShopId()).toArray();
   if (!query) return all;
   const q = query.toLowerCase().trim();
   return all.filter(
@@ -77,9 +84,12 @@ export async function searchCustomers(query) {
 // ============ CUSTOMER STATS ============
 
 export async function getCustomerStats(customerId) {
-  const sales = await db.sales.toArray();
+  const shopId = getCurrentShopId();
+  const [sales, orders] = await Promise.all([
+    db.sales.where("shopId").equals(shopId).toArray(),
+    db.orders.where("shopId").equals(shopId).toArray(),
+  ]);
   const customerSales = sales.filter((s) => s.customerId === customerId);
-  const orders = await db.orders.toArray();
   const customerOrders = orders.filter((o) => o.customerId === customerId);
 
   const totalSpent = customerSales.reduce((sum, s) => sum + (s.total || 0), 0);
@@ -111,7 +121,7 @@ export async function getCustomerStats(customerId) {
 }
 
 export async function getCustomerHistory(customerId) {
-  const sales = await db.sales.toArray();
+  const sales = await db.sales.where("shopId").equals(getCurrentShopId()).toArray();
   const mySales = sales
     .filter((s) => s.customerId === customerId)
     .sort((a, b) => b.ts - a.ts);
