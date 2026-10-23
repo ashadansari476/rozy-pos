@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { fullSync, isSyncConfigured, isOnline } from "../lib/syncEngine";
+import { db } from "../lib/db";
 
 export const useSync = create((set, get) => ({
   status: "idle", // idle | syncing | success | error | offline
@@ -23,19 +24,30 @@ export const useSync = create((set, get) => ({
 
     try {
       const result = await fullSync();
+      const pendingCount = await db.syncQueue.count();
+      const partialFailure = Array.isArray(result?.errors) && result.errors.length > 0;
+      const message = partialFailure
+        ? `Sync incomplete. ${result.errors.length} operation(s) need attention. ${result.errors.slice(0, 3).join(" | ")}`
+        : null;
+
       set({
-        status: "success",
-        lastSync: Date.now(),
-        error: null,
+        status: partialFailure ? "error" : "success",
+        lastSync: parseInt(localStorage.getItem("rozy-pos-last-sync") || "0", 10),
+        pendingCount,
+        error: message,
       });
 
-      // Notify other components to refresh
+      // Notify other components to refresh regardless of success, because partial syncs
+      // may still have imported some valid remote changes.
       window.dispatchEvent(new CustomEvent("sync-complete"));
 
-      // Reset to idle after 3 seconds
-      setTimeout(() => {
-        if (get().status === "success") set({ status: "idle" });
-      }, 3000);
+      // Only clear a successful status automatically. Preserve partial-sync details until
+      // the user starts another attempt or explicitly changes the status.
+      if (!partialFailure) {
+        setTimeout(() => {
+          if (get().status === "success") set({ status: "idle" });
+        }, 3000);
+      }
 
       return result;
     } catch (e) {
