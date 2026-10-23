@@ -197,40 +197,50 @@ export async function migrateExistingDataToRozy() {
     "purchases", "suppliers", "customers", "orders",
     "payments", "expenses", "targets",
   ];
+  const transactionTables = [
+    ...tablesToMigrate.map((name) => db.table(name)),
+    db.products,
+    db.shopStock,
+    db.settings,
+  ];
 
-  for (const tableName of tablesToMigrate) {
-    try {
+  // Keep migration changes and the completion marker atomic. Previously, table errors
+  // were swallowed and the migration flag was still written, making a partial migration
+  // look complete and preventing a later retry.
+  await db.transaction("rw", transactionTables, async () => {
+    for (const tableName of tablesToMigrate) {
       const table = db.table(tableName);
       const all = await table.toArray();
-      const updates = all
-        .filter((r) => !r.shopId)
-        .map((r) => table.update(r.id, { shopId: "rozy" }));
-      await Promise.all(updates);
-    } catch (e) {
-      // ignore
+      for (const record of all) {
+        if (!record.shopId) {
+          await table.update(record.id, { shopId: "rozy" });
+        }
+      }
     }
-  }
 
-  const products = await db.products.toArray();
-  const existingStock = await db.shopStock.toArray();
-  const existingKeys = new Set(existingStock.map((s) => `${s.shopId}-${s.productId}`));
+    const products = await db.products.toArray();
+    const existingStock = await db.shopStock.toArray();
+    const existingKeys = new Set(existingStock.map((stock) => `${stock.shopId}-${stock.productId}`));
 
-  const stockRows = [];
-  for (const p of products) {
-    const key = `rozy-${p.id}`;
-    if (!existingKeys.has(key)) {
-      stockRows.push({
-        shopId: "rozy",
-        productId: p.id,
-        stock: p.stock || 0,
-        lowStock: p.lowStock || 5,
-      });
+    const stockRows = [];
+    for (const product of products) {
+      const key = `rozy-${product.id}`;
+      if (!existingKeys.has(key)) {
+        stockRows.push({
+          shopId: "rozy",
+          productId: product.id,
+          stock: product.stock || 0,
+          lowStock: product.lowStock || 5,
+        });
+      }
     }
-  }
-  if (stockRows.length) {
-    await db.shopStock.bulkAdd(stockRows);
-  }
+    if (stockRows.length) {
+      await db.shopStock.bulkAdd(stockRows);
+    }
 
-  await db.settings.put({ key: "migrated_v4", value: true });
+    // Set the marker only after every migration step has succeeded.
+    await db.settings.put({ key: "migrated_v4", value: true });
+  });
+
   console.log("Migration complete.");
 }

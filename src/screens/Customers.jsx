@@ -3,8 +3,8 @@ import { useCustomers } from "../stores/customerStore";
 import { getCustomerStats, getCustomerHistory } from "../lib/customers";
 import Modal from "../components/ui/Modal";
 import {
-  Users, Search, Plus, Phone, MapPin, User, Award, TrendingUp,
-  ShoppingCart, Calendar, Edit2, Trash2, History,
+  Users, Plus, Phone, MapPin, Award,
+  ShoppingCart, Edit2, Trash2, History,
 } from "lucide-react";
 import SearchInput from "../components/ui/SearchInput";
 
@@ -15,7 +15,7 @@ export default function Customers() {
   const [editing, setEditing] = useState(null);
   const [viewing, setViewing] = useState(null);
 
-  useEffect(() => { loadCustomers(); }, []);
+  useEffect(() => { loadCustomers(); }, [loadCustomers]);
 
   const filtered = customers.filter((c) => {
     if (!search) return true;
@@ -46,7 +46,11 @@ export default function Customers() {
 
   const handleDelete = async (c) => {
     if (!confirm(`Delete customer "${c.name}"?`)) return;
-    await removeCustomer(c.id);
+    try {
+      await removeCustomer(c.id);
+    } catch (error) {
+      alert(error?.message || "Could not delete this customer.");
+    }
   };
 
   const totalSpent = customers.reduce((s, c) => s + (c.totalSpent || 0), 0);

@@ -204,7 +204,9 @@ const FIELD_MAP = {
   payments: {
     shopId: "shop_id",
     orderId: "order_id",
+    userName: "user_name",
     syncVersion: "sync_version",
+    updatedAt: "updated_at",
     createdAt: "created_at",
   },
 };
@@ -361,7 +363,7 @@ export async function pushTable(tableName, records) {
 }
 
 // ---------- PULL ----------
-export async function pullTable(tableName, sinceTs) {
+export async function pullTable(tableName) {
   const config = SYNC_TABLES.find((t) => t.name === tableName);
   if (!config) return { pulled: 0, updated: 0 };
 
@@ -378,14 +380,20 @@ export async function pullTable(tableName, sinceTs) {
       `/${config.supabaseTable}?select=*&limit=${PAGE}&offset=${offset}&order=id.desc`
     );
     if (!Array.isArray(page)) {
-      if (offset === 0) return { pulled: 0, updated: 0 };
-      break;
+      // A malformed/failed response is not an empty table. Throw so fullSync can mark
+      // this table as failed and avoid pushing a stale local copy over the cloud.
+      throw new Error(`Unexpected response while pulling ${config.supabaseTable}`);
     }
     remote = remote.concat(page);
     if (page.length < PAGE) {
       complete = true;
       break;
     }
+  }
+  if (needFull && !complete) {
+    // Never treat a capped/truncated first download as complete; fullSync must skip
+    // pushing this table until the initial pull can be completed successfully.
+    throw new Error(`Initial pull of ${config.supabaseTable} exceeded the safety page limit; no full-sync marker was written.`);
   }
   if (needFull && complete) {
     await db.settings.put({ key: doneKey, value: true });
@@ -405,12 +413,9 @@ export async function pullTable(tableName, sinceTs) {
     for (const r of remote) {
       cloudByName.add((r.name || "").toLowerCase().trim());
     }
-    // Delete local categories that no longer exist in cloud
-    for (const c of localCategories) {
-      if (!cloudByName.has(c.name.toLowerCase().trim())) {
-        await db.categories.delete(c.id);
-      }
-    }
+    // Never delete local categories just because they are absent from this response.
+    // An empty/partial cloud response is not a deletion signal; deleting here could
+    // silently erase locally-created categories before they have synced.
     // Add cloud categories that don't exist locally
     for (const r of remote) {
       const key = (r.name || "").toLowerCase().trim();
@@ -420,6 +425,7 @@ export async function pullTable(tableName, sinceTs) {
           icon: r.icon || "📦",
           sortOrder: r.sort_order || 0,
         });
+        localByName[key] = true;
         pulled++;
       }
     }
@@ -460,14 +466,22 @@ export async function deleteRemote(tableName, id) {
 // ---------- SINGLE PUSH ----------
 export async function pushRecord(tableName, record) {
   if (!isSyncConfigured()) return;
-  if (!isOnline()) {
+
+  // If an earlier write for this row is queued, update the queued snapshot instead
+  // of letting a direct upload race with an older retry and get overwritten later.
+  const queuedForRecord = await db.syncQueue
+    .where("table")
+    .equals(tableName)
+    .and((op) => String(op.recordId) === String(record.id))
+    .count();
+  if (queuedForRecord > 0 || !isOnline()) {
     await queueOperation(tableName, record.id, "upsert", record);
     return;
   }
 
   try {
     await pushTable(tableName, [record]);
-  } catch (e) {
+  } catch {
     await queueOperation(tableName, record.id, "upsert", record);
   }
 }
@@ -489,16 +503,34 @@ export function schedulePushBatch(tableName, record) {
 }
 
 async function flushBatch() {
-  if (!isOnline()) return;
-
   const snapshot = new Map(batchQueue);
   batchQueue = new Map();
 
   for (const [tableName, records] of snapshot) {
+    const directPush = [];
+
+    for (const record of records.values()) {
+      // Batched writes must obey the same queue ordering rule as pushRecord().
+      // Otherwise an old queued retry could overwrite a newer batch upload later.
+      const queued = await db.syncQueue
+        .where("table")
+        .equals(tableName)
+        .and((op) => String(op.recordId) === String(record.id))
+        .count();
+
+      if (!isOnline() || queued > 0) {
+        await queueOperation(tableName, record.id, "upsert", record);
+      } else {
+        directPush.push(record);
+      }
+    }
+
+    if (!directPush.length) continue;
+
     try {
-      await pushTable(tableName, Array.from(records.values()));
-    } catch (e) {
-      for (const record of records.values()) {
+      await pushTable(tableName, directPush);
+    } catch {
+      for (const record of directPush) {
         await queueOperation(tableName, record.id, "upsert", record);
       }
     }
@@ -507,29 +539,49 @@ async function flushBatch() {
 
 // ---------- QUEUE ----------
 export async function queueOperation(tableName, recordId, action, data) {
-  await db.syncQueue.add({
-    table: tableName,
-    recordId,
-    action,
-    data,
-    status: "pending",
-    createdAt: Date.now(),
-    retries: 0,
+  // The queue stores the latest desired state for each row, not a history of every
+  // intermediate snapshot. Coalescing prevents an older failed upsert from replaying
+  // after a newer update and restoring stale cloud data.
+  await db.transaction("rw", db.syncQueue, async () => {
+    const existing = await db.syncQueue
+      .where("table")
+      .equals(tableName)
+      .and((op) => String(op.recordId) === String(recordId))
+      .toArray();
+
+    if (existing.length) {
+      await db.syncQueue.bulkDelete(existing.map((op) => op.id));
+    }
+
+    await db.syncQueue.add({
+      table: tableName,
+      recordId,
+      action,
+      data,
+      status: "pending",
+      createdAt: Date.now(),
+      retries: 0,
+    });
   });
 }
 
 export async function processQueue() {
   if (!isOnline()) return { processed: 0, failed: 0 };
 
-  const pending = await db.syncQueue
-    .where("status")
-    .equals("pending")
-    .toArray();
+  // Retry pending operations and previously failed operations. Failed operations are
+  // retained locally for inspection/retry: silently deleting them can lose sales,
+  // stock movements, refunds, or other records that never reached the cloud.
+  const operations = [
+    ...(await db.syncQueue.where("status").equals("pending").toArray()),
+    ...(await db.syncQueue.where("status").equals("failed").toArray()),
+  ].sort((a, b) => a.id - b.id);
 
   let processed = 0;
   let failed = 0;
 
-  for (const op of pending) {
+  for (const op of operations) {
+    // Mark as pending while retrying so an interrupted attempt remains recoverable.
+    await db.syncQueue.update(op.id, { status: "pending" });
     try {
       if (op.action === "delete") {
         await deleteRemote(op.table, op.recordId);
@@ -540,19 +592,31 @@ export async function processQueue() {
       processed++;
     } catch (e) {
       const newRetries = (op.retries || 0) + 1;
+      // Count every failed attempt, not only operations that reached the terminal
+      // retry threshold. Otherwise fullSync could report success while work is still
+      // pending and incorrectly advance the last-successful-sync timestamp.
+      failed++;
       if (newRetries >= 5) {
-        console.warn(`Giving up on ${op.table}:${op.recordId} after 5 retries`);
-        await db.syncQueue.delete(op.id);
-        failed++;
+        console.warn(`Sync operation retained after ${newRetries} failures: ${op.table}:${op.recordId}`);
+        await db.syncQueue.update(op.id, {
+          status: "failed",
+          retries: newRetries,
+          lastError: String(e?.message || e),
+          lastAttemptAt: Date.now(),
+        });
       } else {
-        await db.syncQueue.update(op.id, { retries: newRetries });
+        await db.syncQueue.update(op.id, {
+          status: "pending",
+          retries: newRetries,
+          lastError: String(e?.message || e),
+          lastAttemptAt: Date.now(),
+        });
       }
     }
   }
 
-  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  await db.syncQueue.where("createdAt").below(weekAgo).delete();
-
+  // Do not age out pending/failed operations: they may be the only copy of a change
+  // that has not reached the cloud yet.
   return { processed, failed };
 }
 
@@ -567,43 +631,66 @@ export async function fullSync() {
   syncInProgress = true;
 
   try {
-    const lastSync = parseInt(localStorage.getItem("rozy-pos-last-sync") || "0");
     const results = { pushed: 0, pulled: 0, updated: 0 };
 
-    await processQueue();
+    const queueResult = await processQueue();
 
-    // Pull
+    const errors = [];
+    if (queueResult.failed > 0) {
+      errors.push(`${queueResult.failed} queued sync operation(s) still failing; they were retained for retry.`);
+    }
+    const pullFailedTables = new Set();
+
+    // Pull first. If a table cannot be read, do not push this device's potentially stale
+    // copy back over the cloud version for that same table.
     for (const table of SYNC_TABLES) {
       try {
-        const pull = await pullTable(table.name, lastSync);
+        const pull = await pullTable(table.name);
         results.pulled += pull.pulled;
         results.updated += pull.updated;
       } catch (e) {
+        pullFailedTables.add(table.name);
+        errors.push(`Pull ${table.name}: ${e?.message || e}`);
         console.warn(`Pull failed for ${table.name}:`, e.message);
       }
     }
 
-    // Push all
+    // Push only tables whose pull completed, to avoid overwriting cloud data with a
+    // stale local snapshot after a read/auth/schema error.
     for (const table of SYNC_TABLES) {
+      if (pullFailedTables.has(table.name)) continue;
       try {
         const localRecords = await db.table(table.name).toArray();
-        if (localRecords.length > 0) {
-          for (let i = 0; i < localRecords.length; i += 100) {
-            const chunk = localRecords.slice(i, i + 100);
-            try {
-              await pushTable(table.name, chunk);
-              results.pushed += chunk.length;
-            } catch (e) {
-              console.warn(`Push failed for ${table.name} chunk:`, e.message);
-            }
+        for (let i = 0; i < localRecords.length; i += 100) {
+          const chunk = localRecords.slice(i, i + 100);
+          try {
+            await pushTable(table.name, chunk);
+            results.pushed += chunk.length;
+          } catch (e) {
+            errors.push(`Push ${table.name}: ${e?.message || e}`);
+            console.warn(`Push failed for ${table.name} chunk:`, e.message);
           }
         }
       } catch (e) {
+        errors.push(`Read local ${table.name}: ${e?.message || e}`);
         console.warn(`Push failed for ${table.name}:`, e.message);
       }
     }
 
-    localStorage.setItem("rozy-pos-last-sync", String(Date.now()));
+    // New local writes can be queued while the pull/push loop is running. Check the
+    // queue again at the end so this run cannot report success while any operation
+    // remains pending/failed (including work created after processQueue took its snapshot).
+    const remainingQueue = await db.syncQueue.count();
+    if (remainingQueue > 0) {
+      errors.push(`${remainingQueue} queued operation(s) remain unsynchronized.`);
+    }
+
+    results.errors = errors;
+    // A partial sync must not be advertised as a successful full sync. The next attempt
+    // should still know that this run did not finish cleanly.
+    if (errors.length === 0) {
+      localStorage.setItem("rozy-pos-last-sync", String(Date.now()));
+    }
     return results;
   } finally {
     syncInProgress = false;

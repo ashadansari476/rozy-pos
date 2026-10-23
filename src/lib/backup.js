@@ -4,6 +4,7 @@
 // ============================================================
 
 import { db } from "./db";
+import { validateBackupForRestore } from "./backupRules";
 
 // All tables to backup (order matters for restore — parent tables first)
 export const BACKUP_TABLES = [
@@ -42,16 +43,27 @@ export async function createBackup() {
     counts: {},
   };
 
-  for (const tableName of BACKUP_TABLES) {
-    try {
-      if (!db.tables.some((t) => t.name === tableName)) continue;
-      const records = await db.table(tableName).toArray();
-      backup.data[tableName] = records;
-      backup.counts[tableName] = records.length;
-    } catch (e) {
-      console.warn(`Backup failed for ${tableName}:`, e.message);
+  // Read every table in one readonly transaction so writes cannot interleave between
+  // table exports and produce a backup whose counts/relationships describe different moments.
+  const tables = BACKUP_TABLES.map((name) => {
+    if (!db.tables.some((table) => table.name === name)) {
+      throw new Error(`Backup incomplete: database table "${name}" is missing`);
     }
-  }
+    return db.table(name);
+  });
+
+  await db.transaction("r", tables, async () => {
+    for (const tableName of BACKUP_TABLES) {
+      try {
+        const records = await db.table(tableName).toArray();
+        backup.data[tableName] = records;
+        backup.counts[tableName] = records.length;
+      } catch (e) {
+        // Never present a partial export as a valid backup.
+        throw new Error(`Backup failed for ${tableName}: ${e?.message || e}`, { cause: e });
+      }
+    }
+  });
 
   return backup;
 }
@@ -82,42 +94,32 @@ export function downloadBackup(backup) {
 export async function restoreBackup(backup, options = {}) {
   const { merge = false } = options;
 
-  if (!backup || !backup.data) {
-    throw new Error("Invalid backup file");
-  }
-
+  const availableTables = BACKUP_TABLES.filter((name) =>
+    db.tables.some((table) => table.name === name)
+  );
+  const tablesToRestore = validateBackupForRestore(backup, availableTables, { merge });
   const results = {};
 
-  for (const tableName of BACKUP_TABLES) {
-    if (!backup.data[tableName]) continue;
-    if (!db.tables.some((t) => t.name === tableName)) continue;
-
-    const records = backup.data[tableName];
-    const table = db.table(tableName);
-
-    try {
-      if (!merge) {
-        // Clear existing
-        await table.clear();
+  // Validate first, then apply all table changes atomically. If one write fails, Dexie
+  // rolls back the transaction instead of leaving a half-restored database.
+  await db.transaction("rw", tablesToRestore.map((name) => db.table(name)), async () => {
+    if (!merge) {
+      for (const tableName of tablesToRestore) {
+        await db.table(tableName).clear();
       }
-      // Insert records
-      for (const record of records) {
-        try {
-          await table.put(record);
-        } catch (e) {
-          console.warn(`Skipped record in ${tableName}:`, e.message);
-        }
+    }
+
+    for (const tableName of tablesToRestore) {
+      const records = backup.data[tableName];
+      if (records.length) {
+        await db.table(tableName).bulkPut(records);
       }
       results[tableName] = records.length;
-    } catch (e) {
-      console.warn(`Restore failed for ${tableName}:`, e.message);
-      results[tableName] = 0;
     }
-  }
+  });
 
   return results;
 }
-
 // ---------- FILE PICKER ----------
 export function pickBackupFile() {
   return new Promise((resolve, reject) => {
@@ -155,7 +157,7 @@ export async function getBackupStats() {
       const count = await db.table(tableName).count();
       stats[tableName] = count;
       totalRecords += count;
-    } catch (e) {
+    } catch {
       stats[tableName] = 0;
     }
   }
