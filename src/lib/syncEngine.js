@@ -503,16 +503,34 @@ export function schedulePushBatch(tableName, record) {
 }
 
 async function flushBatch() {
-  if (!isOnline()) return;
-
   const snapshot = new Map(batchQueue);
   batchQueue = new Map();
 
   for (const [tableName, records] of snapshot) {
+    const directPush = [];
+
+    for (const record of records.values()) {
+      // Batched writes must obey the same queue ordering rule as pushRecord().
+      // Otherwise an old queued retry could overwrite a newer batch upload later.
+      const queued = await db.syncQueue
+        .where("table")
+        .equals(tableName)
+        .and((op) => String(op.recordId) === String(record.id))
+        .count();
+
+      if (!isOnline() || queued > 0) {
+        await queueOperation(tableName, record.id, "upsert", record);
+      } else {
+        directPush.push(record);
+      }
+    }
+
+    if (!directPush.length) continue;
+
     try {
-      await pushTable(tableName, Array.from(records.values()));
+      await pushTable(tableName, directPush);
     } catch {
-      for (const record of records.values()) {
+      for (const record of directPush) {
         await queueOperation(tableName, record.id, "upsert", record);
       }
     }
