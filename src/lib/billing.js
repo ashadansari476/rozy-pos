@@ -48,7 +48,7 @@ export async function saveSale({
 
   await db.transaction(
     "rw",
-    [db.sales, db.saleItems, db.shopStock, db.stockMovements, db.auditLog, db.settings],
+    [db.sales, db.saleItems, db.shopStock, db.stockMovements, db.auditLog, db.settings, db.products],
     async () => {
       // Validate all requested quantities before writing the sale. Missing stock rows
       // are treated as zero, not as permission to sell without deducting inventory.
