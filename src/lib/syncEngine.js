@@ -630,6 +630,14 @@ export async function fullSync() {
       }
     }
 
+    // New local writes can be queued while the pull/push loop is running. Check the
+    // queue again at the end so this run cannot report success while any operation
+    // remains pending/failed (including work created after processQueue took its snapshot).
+    const remainingQueue = await db.syncQueue.count();
+    if (remainingQueue > 0) {
+      errors.push(`${remainingQueue} queued operation(s) remain unsynchronized.`);
+    }
+
     results.errors = errors;
     // A partial sync must not be advertised as a successful full sync. The next attempt
     // should still know that this run did not finish cleanly.
