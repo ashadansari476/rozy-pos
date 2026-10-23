@@ -233,42 +233,97 @@ export async function createOrder({
 }
 
 export async function updateOrder(orderId, data) {
-  return await db.orders.update(orderId, { ...data, updatedAt: Date.now() });
+  const existing = await db.orders.get(orderId);
+  if (!existing) throw new Error("Order not found");
+  if (existing.shopId && existing.shopId !== getCurrentShopId()) {
+    throw new Error("Cannot update an order belonging to another shop");
+  }
+  const updatedAt = Date.now();
+  const updated = { ...existing, ...data, shopId: existing.shopId || getCurrentShopId(), updatedAt };
+  await db.orders.update(orderId, updated);
+  pushRecord("orders", updated).catch(() => {});
+  return 1;
 }
 
 export async function updateOrderStatus(orderId, status, user) {
   const now = Date.now();
   const shopId = getCurrentShopId();
-  await db.orders.update(orderId, { status, updatedAt: now });
+  const existing = await db.orders.get(orderId);
+  if (!existing) throw new Error("Order not found");
+  if (existing.shopId && existing.shopId !== shopId) {
+    throw new Error("Cannot update an order belonging to another shop");
+  }
 
-  await db.auditLog.add({
-    shopId,
-    ts: now,
-    userName: user || "system",
-    action: "ORDER_STATUS_CHANGED",
-    entity: "order",
-    entityId: orderId,
-    details: { status },
+  const updated = { ...existing, shopId, status, updatedAt: now };
+  await db.transaction("rw", [db.orders, db.auditLog], async () => {
+    await db.orders.put(updated);
+    await db.auditLog.add({
+      shopId,
+      ts: now,
+      userName: user || "system",
+      action: "ORDER_STATUS_CHANGED",
+      entity: "order",
+      entityId: orderId,
+      details: { status },
+    });
   });
 
-  pushRecord("orders", { id: orderId, status, updatedAt: now }).catch(() => {});
+  pushRecord("orders", updated).catch(() => {});
 }
 
 export async function recordOrderPayment(orderId, amount, type = "balance", user) {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Payment amount must be a positive number");
+  }
   const order = await db.orders.get(orderId);
-  if (!order) return;
+  if (!order) throw new Error("Order not found");
+
+  const shopId = getCurrentShopId();
+  if (order.shopId && order.shopId !== shopId) {
+    throw new Error("Cannot record payment for another shop's order");
+  }
+
+  const outstanding = Math.max(0, Number(order.totalAmount) - Number(order.advanceAmount || 0));
+  if (amount > outstanding) {
+    throw new Error(`Payment exceeds the outstanding balance of ${outstanding.toFixed(2)}`);
+  }
 
   const now = Date.now();
-  const shopId = getCurrentShopId();
-  const newPaid = (order.advanceAmount || 0) + amount;
-
-  await db.orders.update(orderId, {
-    advanceAmount: newPaid,
-    balanceAmount: Math.max(0, order.totalAmount - newPaid),
+  const updatedOrder = {
+    ...order,
+    shopId: order.shopId || shopId,
+    advanceAmount: (order.advanceAmount || 0) + amount,
+    balanceAmount: Math.max(0, order.totalAmount - (order.advanceAmount || 0) - amount),
     updatedAt: now,
+  };
+  let paymentId;
+
+  // The order balance and payment ledger must not diverge if one write fails.
+  await db.transaction("rw", [db.orders, db.payments, db.auditLog], async () => {
+    await db.orders.put(updatedOrder);
+    paymentId = await db.payments.add({
+      shopId,
+      orderId,
+      ts: now,
+      type,
+      amount,
+      userName: user || "system",
+      note: type === "balance" ? "Balance payment" : "Additional payment",
+    });
+    await db.auditLog.add({
+      shopId,
+      ts: now,
+      userName: user || "system",
+      action: "ORDER_PAYMENT_RECORDED",
+      entity: "order",
+      entityId: orderId,
+      details: { amount, type, paymentId },
+    });
   });
 
-  await db.payments.add({
+  pushRecord("orders", updatedOrder).catch(() => {});
+  pushRecord("payments", {
+    id: paymentId,
     shopId,
     orderId,
     ts: now,
@@ -276,7 +331,7 @@ export async function recordOrderPayment(orderId, amount, type = "balance", user
     amount,
     userName: user || "system",
     note: type === "balance" ? "Balance payment" : "Additional payment",
-  });
+  }).catch(() => {});
 }
 
 export async function deleteOrder(orderId) {
@@ -288,7 +343,7 @@ export async function deleteOrder(orderId) {
 }
 
 export async function getAllOrders({ status, from, to } = {}) {
-  let all = await db.orders.toArray();
+  let all = await db.orders.where("shopId").equals(getCurrentShopId()).toArray();
   if (status && status !== "all") {
     all = all.filter((o) => o.status === status);
   }
@@ -298,14 +353,14 @@ export async function getAllOrders({ status, from, to } = {}) {
 }
 
 export async function getOrdersByCustomer(customerId) {
-  const all = await db.orders.toArray();
+  const all = await db.orders.where("shopId").equals(getCurrentShopId()).toArray();
   return all
     .filter((o) => o.customerId === customerId)
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export async function getOrderStats() {
-  const all = await db.orders.toArray();
+  const all = await db.orders.where("shopId").equals(getCurrentShopId()).toArray();
   const now = Date.now();
   const startOfDay = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
   const endOfDay = startOfDay + 24 * 60 * 60 * 1000;
