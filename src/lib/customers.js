@@ -47,7 +47,11 @@ export async function updateCustomer(id, data) {
   const now = Date.now();
   const existing = await db.customers.get(id);
   if (!existing) return 0;
-  const shopId = existing.shopId || getCurrentShopId();
+  const currentShopId = getCurrentShopId();
+  if (existing.shopId && existing.shopId !== currentShopId) {
+    throw new Error("Cannot update a customer belonging to another shop");
+  }
+  const shopId = existing.shopId || currentShopId;
   const safeData = { ...data, shopId, updatedAt: now };
   const result = await db.customers.update(id, safeData);
   pushRecord("customers", { id, ...existing, ...safeData }).catch(() => {});
@@ -55,7 +59,39 @@ export async function updateCustomer(id, data) {
 }
 
 export async function deleteCustomer(id) {
-  return await db.customers.delete(id);
+  const customer = await db.customers.get(id);
+  if (!customer) return 0;
+  const shopId = getCurrentShopId();
+  if (customer.shopId && customer.shopId !== shopId) {
+    throw new Error("Cannot delete a customer belonging to another shop");
+  }
+
+  const [salesCount, ordersCount] = await Promise.all([
+    db.sales.where("customerId").equals(id).count(),
+    db.orders.where("customerId").equals(id).count(),
+  ]);
+  if (salesCount > 0 || ordersCount > 0) {
+    throw new Error("This customer has sales or orders. Keep the record so transaction history remains intact.");
+  }
+
+  await db.transaction("rw", [db.customers, db.auditLog, db.syncQueue], async () => {
+    await db.customers.delete(id);
+    await db.auditLog.add({
+      shopId,
+      ts: Date.now(),
+      userName: "system",
+      action: "CUSTOMER_DELETED",
+      entity: "customer",
+      entityId: id,
+      details: { customerName: customer.name },
+    });
+    if (isSyncConfigured()) {
+      await queueOperation("customers", id, "delete", null);
+    }
+  });
+
+  import("../stores/syncStore").then(({ useSync }) => useSync.getState().sync()).catch(() => {});
+  return 1;
 }
 
 export async function getAllCustomers() {
