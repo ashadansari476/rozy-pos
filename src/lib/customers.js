@@ -663,7 +663,11 @@ export async function completeOrder({
   // Queue sync only after all local business records have committed.
   pushRecord("sales", saleRecord).catch(() => {});
   for (const item of saleItemPushes) pushRecord("saleItems", item).catch(() => {});
-  for (const stock of stockPushes) pushRecord("shopStock", stock).catch(() => {});
+  // Only push the final balance once per stock row; multiple lines for the same product
+  // must not race each other and leave an intermediate balance in the cloud.
+  for (const stock of new Map(stockPushes.map((item) => [item.id, item])).values()) {
+    pushRecord("shopStock", stock).catch(() => {});
+  }
   pushRecord("orders", updatedOrder).catch(() => {});
   if (paymentRecord) pushRecord("payments", paymentRecord).catch(() => {});
 
