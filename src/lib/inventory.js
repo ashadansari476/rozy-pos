@@ -8,46 +8,70 @@ function getCurrentShopId() {
 // ============ STOCK ADJUSTMENTS ============
 
 export async function adjustStock({ productId, qty, reason, note, cost, user }) {
+  if (!Number.isFinite(qty) || qty === 0) {
+    throw new Error("Stock adjustment quantity must be a finite, non-zero number");
+  }
+
   const product = await db.products.get(productId);
   if (!product) throw new Error("Product not found");
 
   const shopId = getCurrentShopId();
-  const newStock = Math.max(0, (product.stock || 0) + qty);
+  const ts = Date.now();
+  let newStock = 0;
 
-  await db.products.update(productId, {
-    stock: newStock,
-    updatedAt: Date.now(),
-  });
+  // Stock belongs to a shop, not to the shared product catalogue. Keep the stock
+  // update and its movement/audit records atomic so reports cannot show half a change.
+  await db.transaction("rw", [db.shopStock, db.stockMovements, db.auditLog], async () => {
+    let stockRecord = await db.shopStock
+      .where("[shopId+productId]")
+      .equals([shopId, productId])
+      .first();
 
-  // Log the movement — WITH shopId and userName
-  await db.stockMovements.add({
-    shopId,
-    ts: Date.now(),
-    productId,
-    productName: product.name,
-    qty,
-    unit: product.unit,
-    reason,
-    note: note || "",
-    cost: cost || product.cost || 0,
-    userName: user || "system",
-    balanceAfter: newStock,
-  });
+    if (!stockRecord) {
+      stockRecord = {
+        shopId,
+        productId,
+        stock: 0,
+        lowStock: product.lowStock ?? 5,
+      };
+      stockRecord.id = await db.shopStock.add(stockRecord);
+    }
 
-  // Audit — WITH shopId and userName
-  await db.auditLog.add({
-    shopId,
-    ts: Date.now(),
-    userName: user || "system",
-    action: "STOCK_ADJUSTED",
-    entity: "product",
-    entityId: productId,
-    details: { qty, reason, note, newStock },
+    const currentStock = Number.isFinite(stockRecord.stock) ? stockRecord.stock : 0;
+    newStock = currentStock + qty;
+    if (newStock < 0) {
+      throw new Error(`Insufficient stock. Available: ${currentStock} ${product.unit || ""}`.trim());
+    }
+
+    await db.shopStock.update(stockRecord.id, { stock: newStock, updatedAt: ts });
+
+    await db.stockMovements.add({
+      shopId,
+      ts,
+      productId,
+      productName: product.name,
+      qty,
+      unit: product.unit,
+      reason,
+      note: note || "",
+      cost: cost ?? product.cost ?? 0,
+      userName: user || "system",
+      balanceAfter: newStock,
+    });
+
+    await db.auditLog.add({
+      shopId,
+      ts,
+      userName: user || "system",
+      action: "STOCK_ADJUSTED",
+      entity: "product",
+      entityId: productId,
+      details: { qty, reason, note, newStock },
+    });
   });
 
   return newStock;
 }
-
 // ============ WASTAGE ============
 
 export async function recordWastage({ productId, qty, reason, note, user }) {
@@ -265,27 +289,36 @@ export async function getMovements({ productId, from, to, limit = 100 }) {
 
 // ============ INVENTORY STATS ============
 
-export async function getInventoryStats() {
-  const products = await db.products.toArray();
+export async function getInventoryStats(shopId = getCurrentShopId()) {
+  const [products, stockRows] = await Promise.all([
+    db.products.toArray(),
+    db.shopStock.where("shopId").equals(shopId).toArray(),
+  ]);
+  const stockByProduct = new Map(stockRows.map((row) => [row.productId, row]));
   let totalValue = 0;
   let retailValue = 0;
   let lowCount = 0;
   let outCount = 0;
 
   for (const p of products) {
-    const cost = p.cost || 0;
-    const price = p.price || 0;
-    const stock = p.stock || 0;
+    if (p.active === false) continue;
+    const stockRow = stockByProduct.get(p.id);
+    const cost = Number.isFinite(p.cost) ? p.cost : 0;
+    const price = Number.isFinite(p.price) ? p.price : 0;
+    const stock = Number.isFinite(stockRow?.stock) ? stockRow.stock : 0;
+    const lowStock = Number.isFinite(stockRow?.lowStock)
+      ? stockRow.lowStock
+      : (p.lowStock ?? 5);
 
     totalValue += cost * stock;
     retailValue += price * stock;
 
     if (stock === 0) outCount++;
-    else if (stock <= (p.lowStock || 0)) lowCount++;
+    else if (stock <= lowStock) lowCount++;
   }
 
   return {
-    totalProducts: products.length,
+    totalProducts: products.filter((p) => p.active !== false).length,
     totalValue,
     retailValue,
     potentialProfit: retailValue - totalValue,
