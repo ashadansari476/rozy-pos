@@ -418,6 +418,7 @@ export async function pullTable(tableName, sinceTs) {
           icon: r.icon || "📦",
           sortOrder: r.sort_order || 0,
         });
+        localByName[key] = true;
         pulled++;
       }
     }
