@@ -75,6 +75,10 @@ The app's JSON backup is an IndexedDB/local-device backup; it is not a backup of
 - Confirm Vercel environment variables do not expose secrets to the client bundle.
 - Test health check, sign-in, checkout, sync, reload, and rollback on preview before promotion.
 
+## Product decisions now confirmed
+
+The owner has confirmed multiple shops, multiple devices, owner/cashier roles, India as the initial market, and reliability as the top priority. See [`MULTI_SHOP_ARCHITECTURE.md`](./MULTI_SHOP_ARCHITECTURE.md) for the proposed data boundaries, role model, sync contract, India-market tax requirements, and regression test matrix. This is a design specification; the controls are not all implemented yet.
+
 ## Release gate
 
 Do not merge or deploy until all are true:
