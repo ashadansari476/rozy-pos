@@ -204,7 +204,9 @@ const FIELD_MAP = {
   payments: {
     shopId: "shop_id",
     orderId: "order_id",
+    userName: "user_name",
     syncVersion: "sync_version",
+    updatedAt: "updated_at",
     createdAt: "created_at",
   },
 };
