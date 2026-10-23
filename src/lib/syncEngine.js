@@ -405,12 +405,9 @@ export async function pullTable(tableName, sinceTs) {
     for (const r of remote) {
       cloudByName.add((r.name || "").toLowerCase().trim());
     }
-    // Delete local categories that no longer exist in cloud
-    for (const c of localCategories) {
-      if (!cloudByName.has(c.name.toLowerCase().trim())) {
-        await db.categories.delete(c.id);
-      }
-    }
+    // Never delete local categories just because they are absent from this response.
+    // An empty/partial cloud response is not a deletion signal; deleting here could
+    // silently erase locally-created categories before they have synced.
     // Add cloud categories that don't exist locally
     for (const r of remote) {
       const key = (r.name || "").toLowerCase().trim();
@@ -521,15 +518,19 @@ export async function queueOperation(tableName, recordId, action, data) {
 export async function processQueue() {
   if (!isOnline()) return { processed: 0, failed: 0 };
 
-  const pending = await db.syncQueue
-    .where("status")
-    .equals("pending")
-    .toArray();
+  // Retry pending operations and previously failed operations. Failed operations are
+  // retained locally for inspection/retry: silently deleting them can lose sales,
+  // stock movements, refunds, or other records that never reached the cloud.
+  const pending = await db.syncQueue.where("status").equals("pending").toArray();
+  const previouslyFailed = await db.syncQueue.where("status").equals("failed").toArray();
+  const operations = [...pending, ...previouslyFailed];
 
   let processed = 0;
   let failed = 0;
 
-  for (const op of pending) {
+  for (const op of operations) {
+    // Mark as pending while retrying so an interrupted attempt remains recoverable.
+    await db.syncQueue.update(op.id, { status: "pending" });
     try {
       if (op.action === "delete") {
         await deleteRemote(op.table, op.recordId);
@@ -541,18 +542,27 @@ export async function processQueue() {
     } catch (e) {
       const newRetries = (op.retries || 0) + 1;
       if (newRetries >= 5) {
-        console.warn(`Giving up on ${op.table}:${op.recordId} after 5 retries`);
-        await db.syncQueue.delete(op.id);
+        console.warn(`Sync operation retained after ${newRetries} failures: ${op.table}:${op.recordId}`);
+        await db.syncQueue.update(op.id, {
+          status: "failed",
+          retries: newRetries,
+          lastError: String(e?.message || e),
+          lastAttemptAt: Date.now(),
+        });
         failed++;
       } else {
-        await db.syncQueue.update(op.id, { retries: newRetries });
+        await db.syncQueue.update(op.id, {
+          status: "pending",
+          retries: newRetries,
+          lastError: String(e?.message || e),
+          lastAttemptAt: Date.now(),
+        });
       }
     }
   }
 
-  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  await db.syncQueue.where("createdAt").below(weekAgo).delete();
-
+  // Do not age out pending/failed operations: they may be the only copy of a change
+  // that has not reached the cloud yet.
   return { processed, failed };
 }
 
@@ -572,38 +582,51 @@ export async function fullSync() {
 
     await processQueue();
 
-    // Pull
+    const errors = [];
+    const pullFailedTables = new Set();
+
+    // Pull first. If a table cannot be read, do not push this device's potentially stale
+    // copy back over the cloud version for that same table.
     for (const table of SYNC_TABLES) {
       try {
         const pull = await pullTable(table.name, lastSync);
         results.pulled += pull.pulled;
         results.updated += pull.updated;
       } catch (e) {
+        pullFailedTables.add(table.name);
+        errors.push(`Pull ${table.name}: ${e?.message || e}`);
         console.warn(`Pull failed for ${table.name}:`, e.message);
       }
     }
 
-    // Push all
+    // Push only tables whose pull completed, to avoid overwriting cloud data with a
+    // stale local snapshot after a read/auth/schema error.
     for (const table of SYNC_TABLES) {
+      if (pullFailedTables.has(table.name)) continue;
       try {
         const localRecords = await db.table(table.name).toArray();
-        if (localRecords.length > 0) {
-          for (let i = 0; i < localRecords.length; i += 100) {
-            const chunk = localRecords.slice(i, i + 100);
-            try {
-              await pushTable(table.name, chunk);
-              results.pushed += chunk.length;
-            } catch (e) {
-              console.warn(`Push failed for ${table.name} chunk:`, e.message);
-            }
+        for (let i = 0; i < localRecords.length; i += 100) {
+          const chunk = localRecords.slice(i, i + 100);
+          try {
+            await pushTable(table.name, chunk);
+            results.pushed += chunk.length;
+          } catch (e) {
+            errors.push(`Push ${table.name}: ${e?.message || e}`);
+            console.warn(`Push failed for ${table.name} chunk:`, e.message);
           }
         }
       } catch (e) {
+        errors.push(`Read local ${table.name}: ${e?.message || e}`);
         console.warn(`Push failed for ${table.name}:`, e.message);
       }
     }
 
-    localStorage.setItem("rozy-pos-last-sync", String(Date.now()));
+    results.errors = errors;
+    // A partial sync must not be advertised as a successful full sync. The next attempt
+    // should still know that this run did not finish cleanly.
+    if (errors.length === 0) {
+      localStorage.setItem("rozy-pos-last-sync", String(Date.now()));
+    }
     return results;
   } finally {
     syncInProgress = false;
