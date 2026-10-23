@@ -127,7 +127,7 @@ export async function deleteProduct(id) {
   if (isSyncConfigured()) {
     try {
       await deleteRemote("products", id);
-    } catch (e) {
+    } catch {
       await queueOperation("products", id, "delete", null);
     }
   }
