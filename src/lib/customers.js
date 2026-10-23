@@ -437,129 +437,230 @@ export async function completeOrder({
   counter = "Rozy",
   user,
 }) {
-  const order = await db.orders.get(orderId);
-  if (!order) throw new Error("Order not found");
-  if (order.status === "delivered") throw new Error("Order already delivered");
+  const initialOrder = await db.orders.get(orderId);
+  if (!initialOrder) throw new Error("Order not found");
+  if (initialOrder.status === "delivered") throw new Error("Order already delivered");
+
+  const shopId = getCurrentShopId();
+  if (initialOrder.shopId && initialOrder.shopId !== shopId) {
+    throw new Error("Cannot complete an order belonging to another shop");
+  }
+
+  const receivedAtDelivery = paymentAmount ?? 0;
+  if (!Number.isFinite(receivedAtDelivery) || receivedAtDelivery < 0) {
+    throw new Error("Delivery payment must be a valid non-negative amount");
+  }
+  if (!["Cash", "UPI", "Card"].includes(paymentMode)) {
+    throw new Error("Unsupported payment mode");
+  }
 
   const now = Date.now();
-  const shopId = counter.toLowerCase();
+  let billNo;
+  let saleId;
+  let change = 0;
+  let saleRecord;
+  let paymentRecord = null;
+  let stockPushes = [];
+  let saleItemPushes = [];
+  let updatedOrder;
 
-  const prefix = counter === "Rozy" ? "RZ" : counter === "Warish" ? "WR" : "GN";
-  const seqKey = `billSeq_${counter}`;
-  const rec = await db.settings.get(seqKey);
-  const next = (rec?.value || 0) + 1;
-  await db.settings.put({ key: seqKey, value: next });
-  const billNo = `${prefix}-${String(next).padStart(4, "0")}`;
+  // Delivery touches the sale, sale items, stock, payment ledger, customer totals,
+  // order status, bill sequence, and audit trail. Keep all of those writes atomic.
+  await db.transaction(
+    "rw",
+    [
+      db.settings, db.orders, db.sales, db.saleItems, db.shopStock,
+      db.stockMovements, db.payments, db.customers, db.products, db.auditLog,
+    ],
+    async () => {
+      const order = await db.orders.get(orderId);
+      if (!order) throw new Error("Order not found");
+      if (order.status === "delivered") throw new Error("Order already delivered");
+      if (order.shopId && order.shopId !== shopId) {
+        throw new Error("Cannot complete an order belonging to another shop");
+      }
+      if (!Array.isArray(order.items) || order.items.length === 0) {
+        throw new Error("Order has no items to deliver");
+      }
 
-  const totalPaid = (order.advanceAmount || 0) + (paymentAmount || 0);
-  const change = Math.max(0, totalPaid - order.totalAmount);
+      const advancePaid = Number(order.advanceAmount) || 0;
+      const outstanding = Math.max(0, Number(order.totalAmount) - advancePaid);
+      if (paymentMode !== "Cash" && receivedAtDelivery > outstanding) {
+        throw new Error("Digital payment cannot exceed the outstanding balance");
+      }
+      const totalPaid = advancePaid + receivedAtDelivery;
+      if (totalPaid < Number(order.totalAmount)) {
+        throw new Error(`Insufficient payment. Remaining balance: ${(Number(order.totalAmount) - totalPaid).toFixed(2)}`);
+      }
+      change = paymentMode === "Cash" ? Math.max(0, totalPaid - Number(order.totalAmount)) : 0;
 
-  const saleId = await db.sales.add({
-    shopId,
-    billNo,
-    counter,
-    cashier: user || "system",
-    ts: now,
-    subtotal: order.totalAmount,
-    discount: 0,
-    total: order.totalAmount,
-    payment: {
-      mode: paymentMode,
-      cash: paymentMode === "Cash" ? totalPaid : 0,
-      upi: paymentMode === "UPI" ? totalPaid : 0,
-      card: paymentMode === "Card" ? totalPaid : 0,
-      paid: totalPaid,
-      change,
-    },
-    customerId: order.customerId,
-    customerName: order.customerName,
-    customerPhone: order.customerPhone,
-    fromOrderId: orderId,
-    channel: order.channel || "pos",
-    source: order.source || "pos",
-    note: `From order ${order.orderNo}`,
-    updatedAt: now,
-  });
+      const shopsRec = await db.settings.get("shops");
+      const shop = shopsRec?.value?.find((item) => item.id === shopId);
+      const prefix = shop?.billPrefix || (shopId === "rozy" ? "RZ" : shopId.slice(0, 2).toUpperCase());
+      const seqKey = `billSeq_${shopId}`;
+      const rec = await db.settings.get(seqKey);
+      const next = (rec?.value || 0) + 1;
+      await db.settings.put({ key: seqKey, value: next });
+      billNo = `${prefix}-${getDeviceTag()}-${String(next).padStart(4, "0")}`;
 
-  for (const it of order.items) {
-    await db.saleItems.add({
-      saleId,
-      productId: it.productId,
-      name: it.productName,
-      qty: it.qty,
-      unit: it.unit,
-      price: it.price,
-      lineTotal: it.lineTotal,
-    });
+      const requestedByProduct = new Map();
+      for (const item of order.items) {
+        if (item.productId == null || !Number.isFinite(item.qty) || item.qty <= 0 ||
+            !Number.isFinite(item.price) || item.price < 0) {
+          throw new Error("Order contains an invalid item");
+        }
+        requestedByProduct.set(
+          item.productId,
+          (requestedByProduct.get(item.productId) || 0) + item.qty
+        );
+      }
 
-    // Deduct from shopStock
-    const existing = await db.shopStock
-      .where("[shopId+productId]")
-      .equals([shopId, it.productId])
-      .first();
+      const stockByProduct = new Map();
+      const productById = new Map();
+      for (const [productId, qty] of requestedByProduct) {
+        const stock = await db.shopStock
+          .where("[shopId+productId]")
+          .equals([shopId, productId])
+          .first();
+        const product = await db.products.get(productId);
+        const available = Number.isFinite(stock?.stock) ? stock.stock : 0;
+        if (!stock || qty > available) {
+          throw new Error(`Insufficient stock for ${product?.name || "product"}: ${available} available, ${qty} requested.`);
+        }
+        stockByProduct.set(productId, stock);
+        productById.set(productId, product);
+      }
 
-    if (existing) {
-      const newStock = Math.max(0, (existing.stock || 0) - it.qty);
-      await db.shopStock.update(existing.id, { stock: newStock });
+      saleRecord = {
+        shopId,
+        billNo,
+        counter: shop?.shortName || counter,
+        cashier: user || "system",
+        ts: now,
+        subtotal: order.totalAmount,
+        discount: 0,
+        tax: 0,
+        total: order.totalAmount,
+        payment: {
+          mode: paymentMode,
+          cash: paymentMode === "Cash" ? totalPaid : 0,
+          upi: paymentMode === "UPI" ? totalPaid : 0,
+          card: paymentMode === "Card" ? totalPaid : 0,
+          paid: totalPaid,
+          change,
+        },
+        customerId: order.customerId || null,
+        customerName: order.customerName,
+        customerPhone: order.customerPhone,
+        fromOrderId: orderId,
+        channel: order.channel || "pos",
+        source: order.source || "pos",
+        note: `From order ${order.orderNo}`,
+        createdAt: now,
+        updatedAt: now,
+      };
+      saleId = await db.sales.add(saleRecord);
+      saleRecord = { ...saleRecord, id: saleId };
 
-      await db.stockMovements.add({
+      for (const item of order.items) {
+        const product = productById.get(item.productId);
+        const stock = stockByProduct.get(item.productId);
+        const newStock = stock.stock - item.qty;
+        await db.shopStock.update(stock.id, { stock: newStock, updatedAt: now });
+        stockPushes.push({
+          id: stock.id,
+          shopId,
+          productId: item.productId,
+          stock: newStock,
+          lowStock: stock.lowStock ?? 5,
+          updatedAt: now,
+        });
+
+        const saleItem = {
+          saleId,
+          productId: item.productId,
+          name: item.productName || product?.name || "Product",
+          qty: item.qty,
+          unit: item.unit || product?.unit || "piece",
+          price: item.price,
+          cost: Number.isFinite(item.cost) ? item.cost : (product?.cost || 0),
+          lineTotal: item.lineTotal ?? item.qty * item.price,
+        };
+        const saleItemId = await db.saleItems.add(saleItem);
+        saleItemPushes.push({ ...saleItem, id: saleItemId });
+
+        await db.stockMovements.add({
+          shopId,
+          ts: now,
+          productId: item.productId,
+          productName: saleItem.name,
+          qty: -item.qty,
+          unit: saleItem.unit,
+          reason: "sale",
+          note: `Order ${order.orderNo} delivered`,
+          cost: saleItem.cost,
+          userName: user || "system",
+          balanceAfter: newStock,
+        });
+      }
+
+      if (receivedAtDelivery > 0) {
+        paymentRecord = {
+          shopId,
+          orderId,
+          ts: now,
+          type: "balance",
+          amount: receivedAtDelivery,
+          userName: user || "system",
+          note: `Paid at delivery · ${paymentMode}`,
+        };
+        const paymentId = await db.payments.add(paymentRecord);
+        paymentRecord = { ...paymentRecord, id: paymentId };
+      }
+
+      updatedOrder = {
+        ...order,
+        shopId,
+        status: "delivered",
+        deliveredAt: now,
+        deliveredBy: user || "system",
+        billNo,
+        saleId,
+        balanceAmount: 0,
+        updatedAt: now,
+      };
+      await db.orders.put(updatedOrder);
+
+      if (order.customerId) {
+        const customer = await db.customers.get(order.customerId);
+        if (customer && (!customer.shopId || customer.shopId === shopId)) {
+          await db.customers.update(order.customerId, {
+            totalSpent: (customer.totalSpent || 0) + order.totalAmount,
+            totalOrders: (customer.totalOrders || 0) + 1,
+            lastVisit: now,
+            updatedAt: now,
+          });
+        }
+      }
+
+      await db.auditLog.add({
         shopId,
         ts: now,
-        productId: it.productId,
-        productName: it.productName,
-        qty: -it.qty,
-        unit: it.unit,
-        reason: "sale",
-        note: `Order ${order.orderNo} delivered`,
-        cost: it.cost || 0,
         userName: user || "system",
-        balanceAfter: newStock,
+        action: "ORDER_COMPLETED",
+        entity: "order",
+        entityId: orderId,
+        details: { orderNo: order.orderNo, billNo, totalPaid, paymentMode },
       });
     }
-  }
+  );
 
-  if (paymentAmount > 0) {
-    await db.payments.add({
-      shopId,
-      orderId,
-      ts: now,
-      type: "balance",
-      amount: paymentAmount,
-      note: `Paid at delivery · ${paymentMode}`,
-    });
-  }
-
-  await db.orders.update(orderId, {
-    status: "delivered",
-    deliveredAt: now,
-    deliveredBy: user || "system",
-    billNo,
-    saleId,
-    balanceAmount: 0,
-    updatedAt: now,
-  });
-
-  if (order.customerId) {
-    const cust = await db.customers.get(order.customerId);
-    if (cust) {
-      await db.customers.update(order.customerId, {
-        totalSpent: (cust.totalSpent || 0) + order.totalAmount,
-        totalOrders: (cust.totalOrders || 0) + 1,
-        lastVisit: now,
-        updatedAt: now,
-      });
-    }
-  }
-
-  await db.auditLog.add({
-    shopId,
-    ts: now,
-    userName: user || "system",
-    action: "ORDER_COMPLETED",
-    entity: "order",
-    entityId: orderId,
-    details: { orderNo: order.orderNo, billNo, totalPaid, paymentMode },
-  });
+  // Queue sync only after all local business records have committed.
+  pushRecord("sales", saleRecord).catch(() => {});
+  for (const item of saleItemPushes) pushRecord("saleItems", item).catch(() => {});
+  for (const stock of stockPushes) pushRecord("shopStock", stock).catch(() => {});
+  pushRecord("orders", updatedOrder).catch(() => {});
+  if (paymentRecord) pushRecord("payments", paymentRecord).catch(() => {});
 
   import("../stores/syncStore").then(({ useSync }) => {
     useSync.getState().sync();
@@ -567,3 +668,4 @@ export async function completeOrder({
 
   return { billNo, saleId, change };
 }
+
