@@ -361,7 +361,7 @@ export async function pushTable(tableName, records) {
 }
 
 // ---------- PULL ----------
-export async function pullTable(tableName, sinceTs) {
+export async function pullTable(tableName) {
   const config = SYNC_TABLES.find((t) => t.name === tableName);
   if (!config) return { pulled: 0, updated: 0 };
 
@@ -466,7 +466,7 @@ export async function pushRecord(tableName, record) {
 
   try {
     await pushTable(tableName, [record]);
-  } catch (e) {
+  } catch {
     await queueOperation(tableName, record.id, "upsert", record);
   }
 }
@@ -496,7 +496,7 @@ async function flushBatch() {
   for (const [tableName, records] of snapshot) {
     try {
       await pushTable(tableName, Array.from(records.values()));
-    } catch (e) {
+    } catch {
       for (const record of records.values()) {
         await queueOperation(tableName, record.id, "upsert", record);
       }
@@ -594,7 +594,7 @@ export async function fullSync() {
     // copy back over the cloud version for that same table.
     for (const table of SYNC_TABLES) {
       try {
-        const pull = await pullTable(table.name, lastSync);
+        const pull = await pullTable(table.name);
         results.pulled += pull.pulled;
         results.updated += pull.updated;
       } catch (e) {
