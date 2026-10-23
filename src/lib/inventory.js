@@ -78,6 +78,10 @@ export async function recordWastage({ productId, qty, reason, note, user }) {
   const product = await db.products.get(productId);
   if (!product) throw new Error("Product not found");
 
+  if (!Number.isFinite(qty) || qty <= 0) {
+    throw new Error("Wastage quantity must be a positive number");
+  }
+
   const shopId = getCurrentShopId();
   const cost = product.cost || 0;
   const wastageValue = cost * qty;
@@ -107,8 +111,8 @@ export async function recordWastage({ productId, qty, reason, note, user }) {
   return wastageValue;
 }
 
-export async function getWastage({ from, to }) {
-  const all = await db.wastage.toArray();
+export async function getWastage({ from, to, shopId = getCurrentShopId() } = {}) {
+  const all = await db.wastage.where("shopId").equals(shopId).toArray();
   return all.filter((w) => {
     if (from && w.ts < from) return false;
     if (to && w.ts > to) return false;
@@ -152,7 +156,7 @@ export async function addBatch({ productId, qty, expiryDate, cost, batchNo, user
 export async function getExpiringBatches(daysAhead = 3) {
   const now = Date.now();
   const cutoff = now + daysAhead * 24 * 60 * 60 * 1000;
-  const all = await db.batches.toArray();
+  const all = await db.batches.where("shopId").equals(getCurrentShopId()).toArray();
   return all
     .filter((b) => b.active && b.expiryDate && b.expiryDate <= cutoff && b.qty > 0)
     .sort((a, b) => a.expiryDate - b.expiryDate);
@@ -160,7 +164,7 @@ export async function getExpiringBatches(daysAhead = 3) {
 
 export async function getExpiredBatches() {
   const now = Date.now();
-  const all = await db.batches.toArray();
+  const all = await db.batches.where("shopId").equals(getCurrentShopId()).toArray();
   return all.filter((b) => b.active && b.expiryDate && b.expiryDate < now && b.qty > 0);
 }
 
@@ -199,7 +203,7 @@ export async function deleteSupplier(id) {
 }
 
 export async function getAllSuppliers() {
-  return await db.suppliers.toArray();
+  return await db.suppliers.where("shopId").equals(getCurrentShopId()).toArray();
 }
 
 // ============ PURCHASES ============
@@ -260,8 +264,8 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
   return { purchaseId, total };
 }
 
-export async function getPurchases({ from, to, supplierId }) {
-  const all = await db.purchases.toArray();
+export async function getPurchases({ from, to, supplierId } = {}) {
+  const all = await db.purchases.where("shopId").equals(getCurrentShopId()).toArray();
   return all
     .filter((p) => {
       if (from && p.ts < from) return false;
@@ -274,8 +278,8 @@ export async function getPurchases({ from, to, supplierId }) {
 
 // ============ STOCK MOVEMENTS ============
 
-export async function getMovements({ productId, from, to, limit = 100 }) {
-  const all = await db.stockMovements.toArray();
+export async function getMovements({ productId, from, to, limit = 100 } = {}) {
+  const all = await db.stockMovements.where("shopId").equals(getCurrentShopId()).toArray();
   return all
     .filter((m) => {
       if (productId && m.productId !== productId) return false;
