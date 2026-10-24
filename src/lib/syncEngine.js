@@ -471,16 +471,11 @@ export async function deleteRemote(tableName, id) {
 // ---------- SINGLE PUSH ----------
 export async function pushRecord(tableName, record) {
   if (!isSyncConfigured()) return;
-  if (!isOnline()) {
-    await queueOperation(tableName, record.id, "upsert", record);
-    return;
-  }
-
-  try {
-    await pushTable(tableName, [record]);
-  } catch (e) {
-    await queueOperation(tableName, record.id, "upsert", record);
-  }
+  // Persist the intent BEFORE network I/O. If the tab crashes during a request,
+  // the pending operation survives and can be retried on the next launch.
+  await queueOperation(tableName, record?.id, "upsert", record);
+  if (!isOnline()) return;
+  await processQueue();
 }
 
 // ---------- BATCH PUSH ----------
@@ -525,6 +520,18 @@ async function flushBatch() {
 
 // ---------- QUEUE ----------
 export async function queueOperation(tableName, recordId, action, data) {
+  if (!SYNC_TABLES.some((t) => t.name === tableName)) {
+    throw new Error(`Unknown sync table: ${tableName}`);
+  }
+  if (recordId === undefined || recordId === null || recordId === "") {
+    throw new Error("Sync operation requires a record ID");
+  }
+  if (action !== "upsert" && action !== "delete") {
+    throw new Error(`Unsupported sync action: ${action}`);
+  }
+  if (action === "upsert" && (!data || data.id !== recordId)) {
+    throw new Error("Sync upsert requires matching record data");
+  }
   await db.syncQueue.add({
     table: tableName,
     recordId,
@@ -570,6 +577,18 @@ export async function retryFailedSyncOperation(id) {
   const op = await db.syncQueue.get(id);
   if (!op) throw new Error("Sync operation not found");
   await db.syncQueue.update(id, retryFailedQueueOperation(op));
+}
+
+export async function getSyncQueueStatus() {
+  const operations = await db.syncQueue.toArray();
+  const failed = operations.filter((op) => op.status === "failed");
+  return {
+    pending: operations.filter((op) => op.status === "pending").length,
+    failed: failed.length,
+    failedOperations: failed.map(({ id, table, recordId, lastError, retries }) => ({
+      id, table, recordId, lastError, retries,
+    })),
+  };
 }
 
 // ---------- FULL SYNC ----------
