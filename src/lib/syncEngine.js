@@ -4,6 +4,7 @@
 
 import { db } from "./db";
 import { parseSyncTimestamp } from "./syncTimestampRules";
+import { shouldApplyRemoteRecord } from "./syncConflictRules";
 import { verifyCloudUpsertResponse } from "./syncResponseRules";
 import { nextQueueFailure, selectReadyQueueOperations, retryFailedQueueOperation } from "./syncQueueRules";
 import { authHeaders } from "./supabaseAuth";
@@ -455,12 +456,9 @@ export async function pullTable(tableName, sinceTs) {
       await db.table(tableName).put(local);
       pulled++;
     } else {
-      const localTs = parseSyncTimestamp(existing.updatedAt ?? existing.createdAt);
-      const remoteTs = parseSyncTimestamp(local.updatedAt ?? local.createdAt);
-
-      // No reliable timestamp means a conflict cannot be safely resolved.
-      // Preserve the local record rather than guessing that the cloud wins.
-      if (remoteTs !== null && (localTs === null || remoteTs > localTs)) {
+      // Latest timestamp wins for locally clean records. Equal timestamps
+      // preserve local data until server-authoritative conflict handling exists.
+      if (shouldApplyRemoteRecord(existing, local)) {
         await db.table(tableName).put({ ...existing, ...local });
         updated++;
       }
