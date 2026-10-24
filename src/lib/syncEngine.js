@@ -4,6 +4,7 @@
 
 import { db } from "./db";
 import { parseSyncTimestamp } from "./syncTimestampRules";
+import { verifyCloudUpsertResponse } from "./syncResponseRules";
 import { nextQueueFailure, selectReadyQueueOperations, retryFailedQueueOperation } from "./syncQueueRules";
 import { authHeaders } from "./supabaseAuth";
 import { getSupabaseUrl, getSupabaseKey } from "./supabase";
@@ -362,11 +363,13 @@ export async function pushTable(tableName, records) {
 
   const normalized = normalizeBatch(payload);
 
-  await sbFetch(`/${config.supabaseTable}`, {
+  const response = await sbFetch(`/${config.supabaseTable}`, {
     method: "POST",
     body: JSON.stringify(normalized),
   });
-
+  // Never remove a durable queue entry on an empty or malformed acknowledgement.
+  // This also detects silently filtered writes caused by server-side policies.
+  verifyCloudUpsertResponse(normalized, response);
   return { pushed: records.length };
 }
 
