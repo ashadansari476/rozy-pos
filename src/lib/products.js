@@ -2,7 +2,7 @@ import { db } from "./db";
 import { isSyncConfigured, processQueue, queueOperation } from "./syncEngine";
 
 // ============ PRODUCTS ============
-import { filterProductsForShop, productBelongsToShop } from "./productShopRules";
+import { filterProductsForShop, productBelongsToShop, withShopStock } from "./productShopRules";
 
 
 export async function getAllProducts() {
@@ -10,16 +10,11 @@ export async function getAllProducts() {
 }
 
 export async function getProductsWithStock(shopId) {
-  const products = filterProductsForShop(await db.products.toArray(), shopId);
-  const stocks = await db.shopStock.where("shopId").equals(shopId).toArray();
-  const stockMap = {};
-  for (const s of stocks) stockMap[s.productId] = s;
-
-  return products.map((p) => ({
-    ...p,
-    stock: stockMap[p.id]?.stock ?? 0,
-    lowStock: stockMap[p.id]?.lowStock ?? p.lowStock ?? 5,
-  }));
+  const [products, stocks] = await Promise.all([
+    db.products.toArray(),
+    db.shopStock.where("shopId").equals(shopId).toArray(),
+  ]);
+  return withShopStock(products, stocks, shopId);
 }
 
 export async function getProduct(id) {
