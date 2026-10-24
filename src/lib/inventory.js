@@ -221,11 +221,28 @@ export async function addSupplier(supplier) {
 }
 
 export async function updateSupplier(id, data) {
-  return await db.suppliers.update(id, { ...data, updatedAt: Date.now() });
+  const shopId = getCurrentShopId();
+  return db.transaction("rw", db.suppliers, async () => {
+    const supplier = await db.suppliers.get(id);
+    if (!supplier || supplier.shopId !== shopId) {
+      throw new Error("Supplier not found in the current shop");
+    }
+    // Never allow a generic update payload to move a supplier between shops
+    // or replace its primary key.
+    const { id: _ignoredId, shopId: _ignoredShop, ...changes } = data || {};
+    return db.suppliers.update(id, { ...changes, updatedAt: Date.now() });
+  });
 }
 
 export async function deleteSupplier(id) {
-  return await db.suppliers.delete(id);
+  const shopId = getCurrentShopId();
+  return db.transaction("rw", db.suppliers, async () => {
+    const supplier = await db.suppliers.get(id);
+    if (!supplier || supplier.shopId !== shopId) {
+      throw new Error("Supplier not found in the current shop");
+    }
+    return db.suppliers.delete(id);
+  });
 }
 
 export async function getAllSuppliers() {
