@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useInventory } from "../stores/inventoryStore";
+import { useShop } from "../stores/shopStore";
 import { useApp } from "../stores/appStore";
 import { addSupplier, updateSupplier, deleteSupplier, getPurchases } from "../lib/inventory";
 import PurchaseModal from "../components/inventory/PurchaseModal";
@@ -10,24 +11,42 @@ import {
 
 export default function Suppliers() {
   const user = useApp((s) => s.user);
-  const { suppliers, products, reloadSuppliers, refresh } = useInventory();
+  const shopId = useShop((s) => s.currentShopId);
+  const { shopId: inventoryShopId, suppliers: cachedSuppliers, products: cachedProducts, reloadSuppliers, refresh } = useInventory();
+  const suppliers = inventoryShopId === shopId ? cachedSuppliers.filter((s) => s.shopId === shopId) : [];
+  const products = inventoryShopId === shopId ? cachedProducts.filter((p) => (p.shopId || "rozy") === shopId) : [];
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [showPurchase, setShowPurchase] = useState(false);
   const [purchases, setPurchases] = useState([]);
+  const [purchasesShop, setPurchasesShop] = useState(null);
+  const visiblePurchases = purchasesShop === shopId ? purchases.filter((p) => p.shopId === shopId) : [];
 
   useEffect(() => {
-    reloadSuppliers();
-    refresh();
-    (async () => {
-      const p = await getPurchases({});
-      setPurchases(p);
-    })();
-  }, []);
+    if (!shopId) return;
+    let cancelled = false;
+    setShowPurchase(false);
+    setShowAdd(false);
+    setEditing(null);
+    setPurchases([]);
+    setPurchasesShop(null);
+    refresh().catch(console.error);
+    getPurchases({ shopId }).then((rows) => {
+      if (!cancelled) {
+        setPurchases(rows);
+        setPurchasesShop(shopId);
+      }
+    }).catch(console.error);
+    return () => { cancelled = true; };
+  }, [shopId, refresh]);
 
   const refreshPurchases = async () => {
-    const p = await getPurchases({});
-    setPurchases(p);
+    const requestedShop = shopId;
+    const p = await getPurchases({ shopId: requestedShop });
+    if (useShop.getState().currentShopId === requestedShop) {
+      setPurchases(p);
+      setPurchasesShop(requestedShop);
+    }
   };
 
   const handleSave = async () => {
@@ -63,7 +82,7 @@ export default function Suppliers() {
     setShowAdd(true);
   };
 
-  const totalPurchases = purchases.reduce((sum, p) => sum + p.total, 0);
+  const totalPurchases = visiblePurchases.reduce((sum, p) => sum + p.total, 0);
 
   return (
     <div className="h-full flex flex-col">
@@ -74,7 +93,7 @@ export default function Suppliers() {
               <Truck size={24} /> Suppliers
             </h1>
             <p className="text-xs text-ink-muted mt-0.5">
-              {suppliers.length} suppliers · {purchases.length} purchases
+              {suppliers.length} suppliers · {visiblePurchases.length} purchases
             </p>
           </div>
           <button onClick={() => setShowPurchase(true)} className="btn-outline text-sm">
@@ -96,7 +115,7 @@ export default function Suppliers() {
             ₹{totalPurchases.toFixed(2)}
           </div>
           <div className="text-xs text-ink-muted mt-1">
-            {purchases.length} purchase entries
+            {visiblePurchases.length} purchase entries
           </div>
         </div>
 
@@ -117,7 +136,7 @@ export default function Suppliers() {
         ) : (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
             {suppliers.map((s) => {
-              const supplierPurchases = purchases.filter((p) => p.supplierId === s.id);
+              const supplierPurchases = visiblePurchases.filter((p) => p.supplierId === s.id);
               const total = supplierPurchases.reduce((sum, p) => sum + p.total, 0);
               return (
                 <div key={s.id} className="card p-4">
