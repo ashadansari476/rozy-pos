@@ -1,4 +1,5 @@
 import { validatePurchaseItems, normalizePurchaseSupplierId } from "./inventoryRules";
+import { isExpiredBatch, isExpiringBatch } from "./batchExpiryRules";
 import { db } from "./db";
 import Dexie from "dexie";
 import { isSyncConfigured, processQueue, queueOperation } from "./syncEngine";
@@ -218,17 +219,16 @@ export async function addBatch({ productId, qty, expiryDate, cost, batchNo, user
 
 export async function getExpiringBatches(daysAhead = 3, shopId = getCurrentShopId()) {
   const now = Date.now();
-  const cutoff = now + daysAhead * 24 * 60 * 60 * 1000;
   const all = await db.batches.where("shopId").equals(shopId).toArray();
   return all
-    .filter((b) => b.active && b.expiryDate && b.expiryDate <= cutoff && b.qty > 0)
+    .filter((b) => isExpiringBatch(b, daysAhead, now))
     .sort((a, b) => a.expiryDate - b.expiryDate);
 }
 
 export async function getExpiredBatches(shopId = getCurrentShopId()) {
   const now = Date.now();
   const all = await db.batches.where("shopId").equals(shopId).toArray();
-  return all.filter((b) => b.active && b.expiryDate && b.expiryDate < now && b.qty > 0);
+  return all.filter((b) => isExpiredBatch(b, now));
 }
 
 export async function markBatchExpired(batchId, user) {
