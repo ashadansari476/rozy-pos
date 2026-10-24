@@ -1,23 +1,19 @@
 import { db } from "./db";
 import { localDateKey } from "./dates";
 import { netCash } from "./money";
+import { filterReportSales, filterReportItems, topItemsForReport } from "./reportShopRules";
 
-// Get sales within a date range, optionally filtered by counter
-export async function getSalesInRange({ from, to, counter }) {
+// Shop comparison must use shopId, not the legacy counter label.
+export async function getSalesInRange({ from, to, counter, shopId } = {}) {
   const all = await db.sales.toArray();
-  let sales = all.filter((s) => s.ts >= from && s.ts <= to);
-  if (counter && counter !== "Both") {
-    sales = sales.filter((s) => s.counter === counter);
-  }
-  return sales;
+  return filterReportSales(all, { from, to, counter, shopId });
 }
 
 // Full report data for a range
-export async function buildReport({ from, to, counter }) {
-  const sales = await getSalesInRange({ from, to, counter });
-  const saleIds = new Set(sales.map((s) => s.id));
+export async function buildReport({ from, to, counter, shopId }) {
+  const sales = await getSalesInRange({ from, to, counter, shopId });
   const allItems = await db.saleItems.toArray();
-  const items = allItems.filter((i) => saleIds.has(i.saleId));
+  const items = filterReportItems(allItems, sales);
 
   const totalSales = sales.reduce((s, x) => s + (x.total || 0), 0);
   const totalDiscount = sales.reduce((s, x) => s + (x.discount || 0), 0);
@@ -34,23 +30,15 @@ export async function buildReport({ from, to, counter }) {
     }
   }
 
-  // Item aggregation
-  const itemMap = {};
-  for (const it of items) {
-    const key = it.name;
-    if (!itemMap[key]) {
-      itemMap[key] = { name: it.name, qty: 0, unit: it.unit, revenue: 0 };
-    }
-    itemMap[key].qty += it.qty;
-    itemMap[key].revenue += it.lineTotal || it.qty * it.price;
-  }
-  const topItems = Object.values(itemMap)
-    .sort((a, b) => b.revenue - a.revenue);
+  // Aggregate only line items from the filtered shop's sales.
+  const topItems = topItemsForReport(items);
 
   // Category breakdown (join with products)
   const products = await db.products.toArray();
   const productById = {};
-  for (const p of products) productById[p.id] = p;
+  for (const p of products) {
+    if (!shopId || p.shopId === shopId) productById[p.id] = p;
+  }
 
   const catMap = {};
   for (const it of items) {
@@ -106,12 +94,12 @@ export async function buildReport({ from, to, counter }) {
 }
 
 // Get today's quick stats
-export async function getTodayStats(counter) {
+export async function getTodayStats(counter, shopId) {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const end = start + 24 * 60 * 60 * 1000;
 
-  return buildReport({ from: start, to: end, counter });
+  return buildReport({ from: start, to: end, counter, shopId });
 }
 
 // CSV export helper
