@@ -37,11 +37,13 @@ export const SYNC_TABLES = [
 // ---------- Field name converters ----------
 const FIELD_MAP = {
   products: {
+    shopId: "shop_id",
     createdAt: "created_at",
     updatedAt: "updated_at",
     syncVersion: "sync_version",
   },
   categories: {
+    shopId: "shop_id",
     sortOrder: "sort_order",
     createdAt: "created_at",
     updatedAt: "updated_at",
@@ -406,36 +408,24 @@ export async function pullTable(tableName, sinceTs) {
   let pulled = 0;
   let updated = 0;
 
-  // SPECIAL HANDLING: Categories sync by NAME to prevent duplicates
+  // Category names are unique only within a bakery, never globally.
   if (tableName === "categories") {
-    // Category IDs are not stable across devices; do not merge while local
-    // category changes remain unsent.
-    const unsentCategories = await db.syncQueue.filter((op) =>
+    const pending = await db.syncQueue.filter((op) =>
       op.table === "categories" && (op.status === "pending" || op.status === "failed")
     ).count();
-    if (unsentCategories) return { pulled: 0, updated: 0 };
+    if (pending) return { pulled: 0, updated: 0 };
     const localCategories = await db.categories.toArray();
-    const localByName = {};
-    for (const c of localCategories) {
-      localByName[c.name.toLowerCase().trim()] = c;
-    }
-    const cloudByName = new Set();
+    const keys = new Set(localCategories.map((c) =>
+      JSON.stringify([c.shopId || "rozy", String(c.name || "").toLowerCase().trim()])
+    ));
     for (const r of remote) {
-      cloudByName.add((r.name || "").toLowerCase().trim());
-    }
-    // A partial or stale cloud response must never delete local categories.
-    // Deletions require an explicit, acknowledged tombstone protocol.
-    // Add cloud categories that don't exist locally
-    for (const r of remote) {
-      const key = (r.name || "").toLowerCase().trim();
-      if (!localByName[key]) {
-        await db.categories.add({
-          name: r.name,
-          icon: r.icon || "📦",
-          sortOrder: r.sort_order || 0,
-        });
-        pulled++;
-      }
+      const shopId = r.shop_id || "rozy";
+      const name = String(r.name || "").trim();
+      const key = JSON.stringify([shopId, name.toLowerCase()]);
+      if (!name || keys.has(key)) continue;
+      await db.categories.add({ shopId, name, icon: r.icon || "📦", sortOrder: r.sort_order || 0 });
+      keys.add(key);
+      pulled++;
     }
     return { pulled, updated };
   }
