@@ -347,6 +347,18 @@ function normalizeBatch(payloads) {
   });
 }
 
+// Parent records determine which child rows may be downloaded.
+const CHILD_PARENT = {
+  saleItems: { table: "sales", column: "sale_id" },
+  orderItems: { table: "orders", column: "order_id" },
+  purchaseItems: { table: "purchases", column: "purchase_id" },
+};
+function requiredShop() {
+  const shop = localStorage.getItem("rozy-pos-current-shop");
+  if (shop !== "rozy" && shop !== "warish") throw new Error("Select a valid bakery before cloud sync");
+  return shop;
+}
+
 // ---------- PUSH ----------
 export async function pushTable(tableName, records) {
   if (!records.length) return { pushed: 0 };
@@ -365,6 +377,18 @@ export async function pushTable(tableName, records) {
     for (const record of records) {
       if (record.shopId !== activeShop) {
         throw new Error(`Blocked ${tableName} sync: record bakery does not match active bakery`);
+      }
+    }
+  }
+
+  if (!shopScoped) {
+    const child = CHILD_PARENT[tableName];
+    const shop = requiredShop();
+    for (const record of records) {
+      const parentId = record[child.column.replace(/_([a-z])/g, (_, c) => c.toUpperCase())];
+      const parent = await db.table(child.table).get(parentId);
+      if (!parent || parent.shopId !== shop) {
+        throw new Error(`Blocked ${tableName} upload: missing or cross-bakery parent`);
       }
     }
   }
@@ -401,23 +425,32 @@ export async function pullTable(tableName, sinceTs) {
   // tracking exists, correctness takes priority over bandwidth.
   const PAGE = 500;
   const MAX_PAGES = 1000;
-  const remote = [];
-  let complete = false;
-  for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex++) {
-    const page = await sbFetch(
-      `/${config.supabaseTable}?select=*&limit=${PAGE}&offset=${pageIndex * PAGE}&order=id.desc`
-    );
-    if (!Array.isArray(page)) {
-      throw new Error(`Invalid cloud response for ${tableName}`);
+  const shop = requiredShop();
+  const child = CHILD_PARENT[tableName];
+  let filters;
+  if (child) {
+    // Only request children of parent rows belonging to this bakery.
+    // The server's parent-derived RLS remains the authoritative boundary.
+    const parents = await db.table(child.table).where("shopId").equals(shop).primaryKeys();
+    filters = [];
+    for (let i = 0; i < parents.length; i += 100) {
+      filters.push(`${child.column}=in.(${parents.slice(i, i + 100).map(encodeURIComponent).join(",")})`);
     }
-    remote.push(...page);
-    if (page.length < PAGE) {
-      complete = true;
-      break;
-    }
+  } else {
+    filters = [`shop_id=eq.${shop}`];
   }
-  if (!complete) {
-    throw new Error(`Cloud pull exceeded pagination limit for ${tableName}`);
+  const remote = [];
+  for (const filter of filters) {
+    let complete = false;
+    for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex++) {
+      const page = await sbFetch(
+        `/${config.supabaseTable}?select=*&${filter}&limit=${PAGE}&offset=${pageIndex * PAGE}&order=id.desc`
+      );
+      if (!Array.isArray(page)) throw new Error(`Invalid cloud response for ${tableName}`);
+      remote.push(...page);
+      if (page.length < PAGE) { complete = true; break; }
+    }
+    if (!complete) throw new Error(`Cloud pull exceeded pagination limit for ${tableName}`);
   }
 
   let pulled = 0;
@@ -436,7 +469,12 @@ export async function pullTable(tableName, sinceTs) {
   for (const r of remote) {
     const local = toLocal(r, tableName);
     if (dirtyIds.has(String(local.id))) continue;
+    if (!child && local.shopId !== shop) throw new Error(`Cloud returned wrong bakery for ${tableName}`);
+    // A cloud row must never replace a local record from the other bakery.
     const existing = await db.table(tableName).get(local.id);
+    if (existing && !child && existing.shopId !== shop) {
+      throw new Error(`Cross-bakery ID collision in ${tableName}: ${local.id}`);
+    }
 
     if (!existing) {
       await db.table(tableName).put(local);
