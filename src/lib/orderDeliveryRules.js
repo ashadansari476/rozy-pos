@@ -1,4 +1,4 @@
-import { remainingStockAfterSale } from "./saleRules";
+import { remainingStockAfterSale } from "./saleRules.js";
 
 /**
  * The delivery is a final settlement, not an opportunity to silently erase
