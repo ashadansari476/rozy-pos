@@ -289,11 +289,18 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
         }
       }
 
+      // Resolve the supplier name from the verified local record rather than
+      // trusting a caller-supplied label that could misstate the purchase ledger.
+      const verifiedSupplier = supplierId !== undefined && supplierId !== null && supplierId !== ""
+        ? await db.suppliers.get(supplierId)
+        : null;
+      const recordedSupplierName = verifiedSupplier?.name || supplierName || "Unknown";
+
       purchaseId = await db.purchases.add({
         shopId,
         ts: Date.now(),
         supplierId: supplierId || null,
-        supplierName: supplierName || "Unknown",
+        supplierName: recordedSupplierName,
         items: items.map((it) => ({
           productId: it.productId,
           productName: it.productName,
@@ -312,7 +319,7 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
           productId: it.productId,
           qty: it.qty,
           reason: "restock",
-          note: `Purchase from ${supplierName || "supplier"}`,
+          note: `Purchase from ${recordedSupplierName}`,
           cost: it.cost,
           user,
         });
