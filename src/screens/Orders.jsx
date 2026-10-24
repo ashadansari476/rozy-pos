@@ -357,10 +357,11 @@ function StatMini({ icon, label, value, warn }) {
 }
 
 function DeliveryPaymentModal({ order, onClose, onConfirm }) {
+  const shopId = useShop((s) => s.currentShopId);
+  const counter = shopId === "warish" ? "Warish" : "Rozy";
   const balance = order.balanceAmount || 0;
   const [paymentMode, setPaymentMode] = useState("Cash");
   const [amount, setAmount] = useState(balance.toFixed(2));
-  const [counter, setCounter] = useState("Rozy");
   const [saving, setSaving] = useState(false);
 
   const amountNum = parseFloat(amount) || 0;
@@ -368,14 +369,25 @@ function DeliveryPaymentModal({ order, onClose, onConfirm }) {
   const remaining = Math.max(0, balance - amountNum);
 
   const handleConfirm = async () => {
+    if (!Number.isFinite(amountNum) || amountNum < balance) {
+      alert("Collect the outstanding balance before delivery");
+      return;
+    }
+    if (paymentMode !== "Cash" && amountNum !== balance) {
+      alert("UPI and Card payments must equal the outstanding balance");
+      return;
+    }
     setSaving(true);
-    await onConfirm({
-      orderId: order.id,
-      paymentAmount: amountNum,
-      paymentMode,
-      counter,
-    });
-    setSaving(false);
+    try {
+      await onConfirm({
+        orderId: order.id,
+        paymentAmount: amountNum,
+        paymentMode,
+        counter,
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -440,21 +452,9 @@ function DeliveryPaymentModal({ order, onClose, onConfirm }) {
       </div>
 
       <div className="mb-4">
-        <label className="label">Counter (for bill number)</label>
-        <div className="grid grid-cols-2 gap-2">
-          {["Rozy", "Warish"].map((c) => (
-            <button
-              key={c}
-              onClick={() => setCounter(c)}
-              className={`py-2.5 rounded-xl font-semibold text-sm transition ${
-                counter === c
-                  ? "bg-primary text-white shadow-warm"
-                  : "bg-bg/45 text-ink hover:bg-primary-light"
-              }`}
-            >
-              {c}
-            </button>
-          ))}
+        <label className="label">Bill generated for</label>
+        <div className="bg-bg/45 rounded-xl p-3 text-sm font-semibold">
+          {counter} Bakery
         </div>
       </div>
 
