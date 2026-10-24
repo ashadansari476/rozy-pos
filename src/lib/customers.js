@@ -295,23 +295,41 @@ export async function updateOrder(orderId, data) {
 }
 
 export async function updateOrderStatus(orderId, status, user) {
-  const now = Date.now();
+  if (!["pending", "ready", "cancelled"].includes(status)) {
+    throw new Error("Use order delivery for completing orders");
+  }
   const shopId = getCurrentShopId();
-  const order = await db.orders.get(orderId);
-  if (!order || order.shopId !== shopId) throw new Error("Order does not belong to the selected bakery");
-  await db.orders.update(orderId, { status, updatedAt: now });
-
-  const statusAuditId = await db.auditLog.add({
-    shopId,
-    ts: now,
-    userName: user || "system",
-    action: "ORDER_STATUS_CHANGED",
-    entity: "order",
-    entityId: orderId,
-    details: { status },
+  const now = Date.now();
+  const shouldSync = isSyncConfigured();
+  await db.transaction("rw", [db.orders, db.auditLog, db.syncQueue], async () => {
+    const order = await db.orders.get(orderId);
+    if (!order || order.shopId !== shopId) {
+      throw new Error("Order does not belong to the selected bakery");
+    }
+    if (order.status === "delivered" || order.status === "cancelled") {
+      throw new Error("Cannot change the status of a completed or cancelled order");
+    }
+    if (status === "cancelled" && (order.advanceAmount || 0) > 0) {
+      throw new Error("Refund or settle the recorded advance before cancelling the order");
+    }
+    const updated = { ...order, status, updatedAt: now };
+    await db.orders.put(updated);
+    if (shouldSync) await queueOperation("orders", orderId, "upsert", updated);
+    const audit = {
+      shopId,
+      ts: now,
+      userName: user || "system",
+      action: "ORDER_STATUS_CHANGED",
+      entity: "order",
+      entityId: orderId,
+      details: { status },
+    };
+    const auditId = await db.auditLog.add(audit);
+    if (shouldSync) await queueOperation("auditLog", auditId, "upsert", { id: auditId, ...audit });
   });
-
-  await queueSavedChanges([{ table: "orders", id: orderId }, { table: "auditLog", id: statusAuditId }]);
+  if (shouldSync && typeof navigator !== "undefined" && navigator.onLine) {
+    processQueue().catch((error) => console.error("Order status sync remains queued", error));
+  }
 }
 
 export async function recordOrderPayment(orderId, amount, type = "balance", user) {
