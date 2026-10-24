@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { useInventory } from "../stores/inventoryStore";
+import { useShop } from "../stores/shopStore";
+import { productBelongsToShop } from "../lib/productShopRules";
 import { useApp } from "../stores/appStore";
 import StockAdjustModal from "../components/inventory/StockAdjustModal";
 import WastageModal from "../components/inventory/WastageModal";
@@ -13,8 +15,9 @@ import SearchInput from "../components/ui/SearchInput";
 
 export default function Inventory() {
   const user = useApp((s) => s.user);
+  const currentShopId = useShop((s) => s.currentShopId);
   const {
-    products, stats, movements, expiring, expired, profit, loading, loadAll,
+    shopId: loadedShopId, products, stats, movements, expiring, expired, profit, loading, error, loadAll,
   } = useInventory();
 
   const [search, setSearch] = useState("");
@@ -24,10 +27,12 @@ export default function Inventory() {
   const [tab, setTab] = useState("stock"); // stock | movements | wastage | expiry
 
   useEffect(() => {
-    loadAll();
-  }, []);
+    if (currentShopId) loadAll(currentShopId).catch(console.error);
+  }, [currentShopId, loadAll]);
 
   const filtered = products.filter((p) => {
+    // A late cached record must never appear under the wrong bakery.
+    if (!productBelongsToShop(p, currentShopId)) return false;
     if (search) {
       const q = search.toLowerCase();
       if (!p.name.toLowerCase().includes(q) && !(p.barcode || "").includes(q)) return false;
@@ -43,10 +48,14 @@ export default function Inventory() {
   const handleExpire = async (batchId) => {
     if (!confirm("Mark this batch as expired? Stock will be deducted and logged as wastage.")) return;
     await markBatchExpired(batchId, user.username);
-    loadAll();
+    await loadAll(currentShopId);
   };
 
-  if (loading || !stats) {
+  if (!loading && error && loadedShopId === currentShopId) {
+    return <div className="p-6 text-danger">Inventory could not load: {error}</div>;
+  }
+
+  if (loading || loadedShopId !== currentShopId || !stats) {
     return (
       <div className="h-full flex items-center justify-center text-ink-muted">
         Loading inventory...
@@ -319,7 +328,7 @@ export default function Inventory() {
         )}
 
         {tab === "wastage" && (
-          <WastageTab />
+          <WastageTab shopId={currentShopId} />
         )}
       </div>
 
@@ -327,14 +336,14 @@ export default function Inventory() {
         open={!!adjusting}
         onClose={() => setAdjusting(null)}
         product={adjusting}
-        onSaved={loadAll}
+        onSaved={() => loadAll(currentShopId)}
       />
 
       <WastageModal
         open={!!wasting}
         onClose={() => setWasting(null)}
         product={wasting}
-        onSaved={loadAll}
+        onSaved={() => loadAll(currentShopId)}
       />
     </div>
   );
@@ -355,7 +364,7 @@ function SmallStat({ icon, label, value, warn }) {
   );
 }
 
-function WastageTab() {
+function WastageTab({ shopId }) {
   const [wastage, setWastage] = useState([]);
   const [range, setRange] = useState("month");
 
@@ -364,10 +373,10 @@ function WastageTab() {
       const { getWastage } = await import("../lib/inventory");
       const now = new Date();
       const start = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-      const data = await getWastage({ from: start });
+      const data = await getWastage({ from: start, shopId });
       setWastage(data.sort((a, b) => b.ts - a.ts));
     })();
-  }, [range]);
+  }, [range, shopId]);
 
   const total = wastage.reduce((s, w) => s + (w.costValue || 0), 0);
 
