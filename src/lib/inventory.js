@@ -90,8 +90,11 @@ export async function recordWastage({ productId, qty, reason, note, user }) {
   }
 
   const shopId = getCurrentShopId();
-  const cost = product.cost || 0;
+  const cost = product.cost ?? 0;
   const wastageValue = cost * qty;
+  if (!Number.isFinite(wastageValue) || wastageValue < 0) {
+    throw new Error("Wastage value exceeds safe currency limits");
+  }
 
   // Stock movement, audit entry, and wastage record must succeed or fail together.
   // Otherwise an error could deduct stock without leaving the matching wastage record.
@@ -164,7 +167,7 @@ export async function addBatch({ productId, qty, expiryDate, cost, batchNo, user
         qty,
         unit: product.unit,
         expiryDate: expiryDate || null,
-        cost: cost || product.cost || 0,
+        cost: cost ?? product.cost ?? 0,
         batchNo: batchNo || "",
         ts: Date.now(),
         active: true,
@@ -227,8 +230,9 @@ export async function markBatchExpired(batchId, user) {
 
 export async function addSupplier(supplier) {
   const shopId = getCurrentShopId();
+  const { id: _ignoredId, shopId: _ignoredShop, ...details } = supplier || {};
   return await db.suppliers.add({
-    ...supplier,
+    ...details,
     shopId,
     createdAt: Date.now(),
   });
@@ -305,7 +309,7 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
       purchaseId = await db.purchases.add({
         shopId,
         ts: Date.now(),
-        supplierId: supplierId || null,
+        supplierId: supplierId ?? null,
         supplierName: recordedSupplierName,
         items: items.map((it) => ({
           productId: it.productId,

@@ -476,6 +476,16 @@ export async function deleteRemote(tableName, id) {
   await sbFetch(`/${config.supabaseTable}?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+// ---------- DURABLE DELETE INTENT ----------
+// Call after the corresponding local deletion has committed. The queued
+// tombstone blocks cloud pulls from resurrecting that record until acknowledged.
+// For full crash safety, local deletion + queue intent must share a transaction.
+export async function queueDelete(tableName, recordId) {
+  if (!isSyncConfigured()) return;
+  await queueOperation(tableName, recordId, "delete");
+  if (isOnline()) await processQueue();
+}
+
 // ---------- SINGLE PUSH ----------
 export async function pushRecord(tableName, record) {
   if (!isSyncConfigured()) return;
@@ -517,7 +527,7 @@ export async function queueOperation(tableName, recordId, action, data) {
   if (action === "upsert" && (!data || data.id !== recordId)) {
     throw new Error("Sync upsert requires matching record data");
   }
-  await db.syncQueue.add({
+  return db.syncQueue.add({
     table: tableName,
     recordId,
     action,
@@ -583,6 +593,8 @@ export async function getSyncQueueStatus() {
   return {
     pending: operations.filter((op) => op.status === "pending").length,
     failed: failed.length,
+    total: operations.length,
+    blocked: operations.filter((op) => op.status !== "pending" && op.status !== "failed").length,
     failedOperations: failed.map(({ id, table, recordId, lastError, retries }) => ({
       id, table, recordId, lastError, retries,
     })),

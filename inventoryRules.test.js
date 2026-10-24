@@ -24,3 +24,12 @@ test("purchase rejects overflowed aggregate totals", () => {
   const almostLimit = Math.floor(Number.MAX_SAFE_INTEGER / 100) - 100;
   assert.throws(() => validatePurchaseItems([item(1, almostLimit), item(1, almostLimit)]), /safe currency limits/);
 });
+
+test("purchase rejects non-finite computed line amounts", () => {
+  assert.throws(() => validatePurchaseItems([item(1e308, 1e308)]), /safe currency limits/);
+});
+
+test("purchase rejects non-finite quantities and costs", () => {
+  assert.throws(() => validatePurchaseItems([item(Infinity, 2)]), /positive/);
+  assert.throws(() => validatePurchaseItems([item(1, NaN)]), /non-negative/);
+});

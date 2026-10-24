@@ -15,7 +15,13 @@ export function validatePurchaseItems(items) {
     if (!Number.isFinite(item.cost) || item.cost < 0) {
       throw new Error("Purchase costs must be valid non-negative numbers");
     }
-    const linePaise = Math.round(item.qty * item.cost * 100);
+    // Reject multiplication overflow before rounding, and reject values that
+    // cannot be represented accurately in the application's minor units.
+    const rawPaise = item.qty * item.cost * 100;
+    if (!Number.isFinite(rawPaise) || rawPaise < 0) {
+      throw new Error("Purchase line amount exceeds safe currency limits");
+    }
+    const linePaise = Math.round(rawPaise);
     if (!Number.isSafeInteger(linePaise) || linePaise < 0) {
       throw new Error("Purchase line amount exceeds safe currency limits");
     }
