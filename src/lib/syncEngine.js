@@ -3,6 +3,7 @@
 // ============================================================
 
 import { db } from "./db";
+import { parseSyncTimestamp } from "./syncTimestampRules";
 import { nextQueueFailure, selectReadyQueueOperations, retryFailedQueueOperation } from "./syncQueueRules";
 import { authHeaders } from "./supabaseAuth";
 import { getSupabaseUrl, getSupabaseKey } from "./supabase";
@@ -366,33 +367,28 @@ export async function pullTable(tableName, sinceTs) {
   const config = SYNC_TABLES.find((t) => t.name === tableName);
   if (!config) return { pulled: 0, updated: 0 };
 
-  // The old code only ever fetched the newest 500 rows of each table, so a new phone or
-  // laptop never received older sales and its reports were wrong. The FIRST pull of each
-  // table now pages through everything; later pulls only need the newest rows.
+  // Fetch every page on each pass. A newest-N pull misses updates to older
+  // records (including historical sales corrections). Until server-side change
+  // tracking exists, correctness takes priority over bandwidth.
   const PAGE = 500;
-  const doneKey = `pulledAll_${tableName}`;
-  const needFull = !(await db.settings.get(doneKey));
-  let remote = [];
+  const MAX_PAGES = 1000;
+  const remote = [];
   let complete = false;
-  for (let offset = 0; offset < (needFull ? 500000 : PAGE); offset += PAGE) {
+  for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex++) {
     const page = await sbFetch(
-      `/${config.supabaseTable}?select=*&limit=${PAGE}&offset=${offset}&order=id.desc`
+      `/${config.supabaseTable}?select=*&limit=${PAGE}&offset=${pageIndex * PAGE}&order=id.desc`
     );
     if (!Array.isArray(page)) {
-      if (offset === 0) return { pulled: 0, updated: 0 };
-      break;
+      throw new Error(`Invalid cloud response for ${tableName}`);
     }
-    remote = remote.concat(page);
+    remote.push(...page);
     if (page.length < PAGE) {
       complete = true;
       break;
     }
   }
-  if (needFull && !complete) {
-    throw new Error(`Incomplete initial pull for ${tableName}; refusing to mark it complete`);
-  }
-  if (needFull) {
-    await db.settings.put({ key: doneKey, value: true });
+  if (!complete) {
+    throw new Error(`Cloud pull exceeded pagination limit for ${tableName}`);
   }
 
   let pulled = 0;
@@ -448,10 +444,12 @@ export async function pullTable(tableName, sinceTs) {
       await db.table(tableName).put(local);
       pulled++;
     } else {
-      const localTs = existing.updatedAt || existing.createdAt || 0;
-      const remoteTs = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
+      const localTs = parseSyncTimestamp(existing.updatedAt ?? existing.createdAt);
+      const remoteTs = parseSyncTimestamp(local.updatedAt ?? local.createdAt);
 
-      if (!localTs || remoteTs > localTs || !existing.updatedAt) {
+      // No reliable timestamp means a conflict cannot be safely resolved.
+      // Preserve the local record rather than guessing that the cloud wins.
+      if (remoteTs !== null && (localTs === null || remoteTs > localTs)) {
         await db.table(tableName).put({ ...existing, ...local });
         updated++;
       }
