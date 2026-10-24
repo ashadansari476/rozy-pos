@@ -3,6 +3,7 @@
 // ============================================================
 
 import { db } from "./db";
+import { nextQueueFailure, shouldAttemptQueueOperation, retryFailedQueueOperation } from "./syncQueueRules";
 import { authHeaders } from "./supabaseAuth";
 import { getSupabaseUrl, getSupabaseKey } from "./supabase";
 
@@ -521,10 +522,10 @@ export async function queueOperation(tableName, recordId, action, data) {
 export async function processQueue() {
   if (!isOnline()) return { processed: 0, failed: 0 };
 
-  const pending = await db.syncQueue
+  const pending = (await db.syncQueue
     .where("status")
     .equals("pending")
-    .toArray();
+    .toArray()).filter((op) => shouldAttemptQueueOperation(op));
 
   let processed = 0;
   let failed = 0;
@@ -539,21 +540,20 @@ export async function processQueue() {
       await db.syncQueue.delete(op.id);
       processed++;
     } catch (e) {
-      const newRetries = (op.retries || 0) + 1;
-      if (newRetries >= 5) {
-        console.warn(`Giving up on ${op.table}:${op.recordId} after 5 retries`);
-        await db.syncQueue.delete(op.id);
-        failed++;
-      } else {
-        await db.syncQueue.update(op.id, { retries: newRetries });
-      }
+      await db.syncQueue.update(op.id, nextQueueFailure(op, e));
+      failed++;
     }
   }
 
-  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  await db.syncQueue.where("createdAt").below(weekAgo).delete();
+  // Never delete unacknowledged operations solely due to age.
 
   return { processed, failed };
+}
+
+export async function retryFailedSyncOperation(id) {
+  const op = await db.syncQueue.get(id);
+  if (!op) throw new Error("Sync operation not found");
+  await db.syncQueue.update(id, retryFailedQueueOperation(op));
 }
 
 // ---------- FULL SYNC ----------
