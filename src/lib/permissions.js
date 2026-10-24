@@ -22,6 +22,8 @@ export const ROLES = {
     canSeeFinancials: true,
     // Can edit products
     canEditProducts: true,
+    canChangePrices: true,
+    canIssueRefunds: true,
     // Can delete records
     canDelete: true,
     // Can access settings + backup + cloud sync
@@ -40,6 +42,8 @@ export const ROLES = {
     canSwitchShops: false,
     canSeeFinancials: false, // No cost/margin/profit
     canEditProducts: false,
+    canChangePrices: false,
+    canIssueRefunds: false,
     canDelete: false,
     canAccessSettings: false,
     canManageCash: false,
@@ -99,3 +103,5 @@ export function filterNavByPermissions(user, navItems) {
     return perms.pages.includes(key);
   });
 }
+export function canChangePrices(user) { return !!user && getPermissions(user.role).canChangePrices === true; }
+export function canIssueRefunds(user) { return !!user && getPermissions(user.role).canIssueRefunds === true; }

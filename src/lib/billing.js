@@ -1,5 +1,5 @@
 import { db, getDeviceTag } from "./db";
-import { pushRecord } from "./syncEngine";
+import { isSyncConfigured, processQueue, queueOperation } from "./syncEngine";
 import { netCash } from "./money";
 
 // Helper — get current shop ID
@@ -29,15 +29,16 @@ export async function saveSale({
     throw new Error("Invalid bill total");
   }
 
+  if (typeof navigator !== "undefined" && !navigator.onLine) throw new Error("Internet is required to complete payments");
   const shop = shopId || getCurrentShopId();
   const ts = Date.now();
-  const pushes = [];
+  const shouldSync = isSyncConfigured();
   let saleId;
   let billNo;
 
   await db.transaction(
     "rw",
-    [db.sales, db.saleItems, db.shopStock, db.stockMovements, db.auditLog, db.settings],
+    [db.sales, db.saleItems, db.shopStock, db.stockMovements, db.auditLog, db.settings, db.syncQueue],
     async () => {
       billNo = await nextBillNumber(shop);
 
@@ -61,41 +62,12 @@ export async function saveSale({
         updatedAt: ts,
       });
 
-      await db.saleItems.bulkAdd(
-        items.map((it) => ({
-          saleId,
-          productId: it.id,
-          name: it.name,
-          unit: it.unit,
-          qty: it.qty,
-          price: it.price,
-          lineTotal: it.qty * it.price,
-          variant: it.variant || null,
-        }))
-      );
-
-      pushes.push([
-        "sales",
-        {
-          id: saleId,
-          shopId: shop,
-          billNo,
-          ts,
-          cashier,
-          subtotal,
-          discount,
-          tax: 0,
-          total,
-          payment,
-          customerId: customer?.id || null,
-          customerName: customer?.name || null,
-          customerPhone: customer?.phone || null,
-          channel: customer?.channel || "pos",
-          source: "pos",
-          updatedAt: ts,
-          createdAt: ts,
-        },
-      ]);
+      if (shouldSync) await queueOperation("sales", saleId, "upsert", await db.sales.get(saleId));
+      for (const it of items) {
+        const item = { saleId, productId: it.id, name: it.name, unit: it.unit, qty: it.qty, price: it.price, cost: it.cost ?? 0, lineTotal: it.qty * it.price, variant: it.variant || null };
+        const itemId = await db.saleItems.add(item);
+        if (shouldSync) await queueOperation("saleItems", itemId, "upsert", { ...item, id: itemId });
+      }
 
       // Deduct stock from THIS shop's shopStock
       for (const it of items) {
@@ -108,19 +80,9 @@ export async function saveSale({
         const newStock = Math.max(0, (existing.stock || 0) - it.qty);
         await db.shopStock.update(existing.id, { stock: newStock, updatedAt: ts });
 
-        pushes.push([
-          "shopStock",
-          {
-            id: existing.id,
-            shopId: shop,
-            productId: it.id,
-            stock: newStock,
-            lowStock: existing.lowStock || 5,
-            updatedAt: ts,
-          },
-        ]);
+        if (shouldSync) await queueOperation("shopStock", existing.id, "upsert", await db.shopStock.get(existing.id));
 
-        await db.stockMovements.add({
+        const movementId = await db.stockMovements.add({
           shopId: shop,
           ts,
           productId: it.id,
@@ -133,9 +95,10 @@ export async function saveSale({
           userName: cashier || "system",
           balanceAfter: newStock,
         });
+        if (shouldSync) await queueOperation("stockMovements", movementId, "upsert", await db.stockMovements.get(movementId));
       }
 
-      await db.auditLog.add({
+      const auditId = await db.auditLog.add({
         shopId: shop,
         ts,
         userName: cashier || "system",
@@ -144,13 +107,12 @@ export async function saveSale({
         entityId: saleId,
         details: { billNo, total, shopId: shop },
       });
+      if (shouldSync) await queueOperation("auditLog", auditId, "upsert", await db.auditLog.get(auditId));
     }
   );
 
-  // Cloud push happens AFTER the local commit; failures are queued by pushRecord.
-  for (const [table, record] of pushes) {
-    pushRecord(table, record).catch(() => {});
-  }
+  // Queue intents committed atomically with sale; network starts after commit.
+  if (shouldSync) processQueue().catch((error) => console.error("Sale cloud sync remains queued", error));
 
   import("../stores/syncStore")
     .then(({ useSync }) => useSync.getState().sync())
