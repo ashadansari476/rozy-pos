@@ -388,7 +388,10 @@ export async function pullTable(tableName, sinceTs) {
       break;
     }
   }
-  if (needFull && complete) {
+  if (needFull && !complete) {
+    throw new Error(`Incomplete initial pull for ${tableName}; refusing to mark it complete`);
+  }
+  if (needFull) {
     await db.settings.put({ key: doneKey, value: true });
   }
 
@@ -406,12 +409,8 @@ export async function pullTable(tableName, sinceTs) {
     for (const r of remote) {
       cloudByName.add((r.name || "").toLowerCase().trim());
     }
-    // Delete local categories that no longer exist in cloud
-    for (const c of localCategories) {
-      if (!cloudByName.has(c.name.toLowerCase().trim())) {
-        await db.categories.delete(c.id);
-      }
-    }
+    // A partial or stale cloud response must never delete local categories.
+    // Deletions require an explicit, acknowledged tombstone protocol.
     // Add cloud categories that don't exist locally
     for (const r of remote) {
       const key = (r.name || "").toLowerCase().trim();
@@ -427,9 +426,16 @@ export async function pullTable(tableName, sinceTs) {
     return { pulled, updated };
   }
 
+  // Do not overwrite records that have local unacknowledged changes.
+  const queued = await db.syncQueue.toArray();
+  const dirtyIds = new Set(queued.filter((op) =>
+    op.table === tableName && (op.status === "pending" || op.status === "failed")
+  ).map((op) => String(op.recordId)));
+
   // Default handling for all other tables
   for (const r of remote) {
     const local = toLocal(r, tableName);
+    if (dirtyIds.has(String(local.id))) continue;
     const existing = await db.table(tableName).get(local.id);
 
     if (!existing) {
@@ -490,10 +496,17 @@ export function schedulePushBatch(tableName, record) {
 }
 
 async function flushBatch() {
-  if (!isOnline()) return;
-
   const snapshot = new Map(batchQueue);
   batchQueue = new Map();
+
+  if (!isOnline()) {
+    for (const [tableName, records] of snapshot) {
+      for (const record of records.values()) {
+        await queueOperation(tableName, record.id, "upsert", record);
+      }
+    }
+    return;
+  }
 
   for (const [tableName, records] of snapshot) {
     try {
@@ -567,42 +580,25 @@ export async function fullSync() {
   syncInProgress = true;
 
   try {
-    const lastSync = parseInt(localStorage.getItem("rozy-pos-last-sync") || "0");
     const results = { pushed: 0, pulled: 0, updated: 0 };
 
-    await processQueue();
+    const queueResult = await processQueue();
+    results.pushed += queueResult.processed;
 
     // Pull
     for (const table of SYNC_TABLES) {
       try {
-        const pull = await pullTable(table.name, lastSync);
+        const pull = await pullTable(table.name);
         results.pulled += pull.pulled;
         results.updated += pull.updated;
       } catch (e) {
-        console.warn(`Pull failed for ${table.name}:`, e.message);
+        throw new Error(`Pull failed for ${table.name}: ${e.message}`, { cause: e });
       }
     }
 
-    // Push all
-    for (const table of SYNC_TABLES) {
-      try {
-        const localRecords = await db.table(table.name).toArray();
-        if (localRecords.length > 0) {
-          for (let i = 0; i < localRecords.length; i += 100) {
-            const chunk = localRecords.slice(i, i + 100);
-            try {
-              await pushTable(table.name, chunk);
-              results.pushed += chunk.length;
-            } catch (e) {
-              console.warn(`Push failed for ${table.name} chunk:`, e.message);
-            }
-          }
-        }
-      } catch (e) {
-        console.warn(`Push failed for ${table.name}:`, e.message);
-      }
-    }
-
+    // NEVER bulk-upload the entire local database on a timer.
+    // Only explicit changes queued by the application may be sent.
+    // Initial data migration must be a separate reviewed and authenticated operation.
     localStorage.setItem("rozy-pos-last-sync", String(Date.now()));
     return results;
   } finally {
