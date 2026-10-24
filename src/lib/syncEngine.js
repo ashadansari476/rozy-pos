@@ -442,10 +442,25 @@ export async function pullTable(tableName, sinceTs) {
     const local = toLocal(r, tableName);
     if (dirtyIds.has(String(local.id))) continue;
     if (!child && local.shopId !== shop) throw new Error(`Cloud returned wrong bakery for ${tableName}`);
-    // A cloud row must never replace a local record from the other bakery.
+    // The child ID namespace is shared by both bakeries. A matching child ID
+    // must never overwrite a local item whose parent belongs to another shop.
+    if (child) {
+      const parentField = child.column.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+      const incomingParent = await db.table(child.table).get(local[parentField]);
+      if (!incomingParent || incomingParent.shopId !== shop) {
+        throw new Error(`Missing or cross-bakery parent for cloud ${tableName} item ${local.id}`);
+      }
+    }
     const existing = await db.table(tableName).get(local.id);
     if (existing && !child && existing.shopId !== shop) {
       throw new Error(`Cross-bakery ID collision in ${tableName}: ${local.id}`);
+    }
+    if (existing && child) {
+      const parentField = child.column.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+      const existingParent = await db.table(child.table).get(existing[parentField]);
+      if (!existingParent || existingParent.shopId !== shop) {
+        throw new Error(`Cross-bakery ID collision in ${tableName}: ${local.id}`);
+      }
     }
 
     if (!existing) {
@@ -656,6 +671,18 @@ export async function fullSync() {
     // NEVER bulk-upload the entire local database on a timer.
     // Only explicit changes queued by the application may be sent.
     // Initial data migration must be a separate reviewed and authenticated operation.
+    // A completed network pass is not a successful sync if this shop still
+    // has pending/failed writes. Do not silently tell a cashier that payments
+    // have reached the cloud when they remain in IndexedDB.
+    const remaining = (await db.syncQueue.toArray()).filter(
+      (op) => op.shopId === requiredShop()
+    );
+    results.pending = remaining.filter((op) => op.status === "pending").length;
+    results.failed = remaining.filter((op) => op.status === "failed").length;
+    results.unsynced = results.pending + results.failed;
+    if (results.unsynced) {
+      throw new Error(`Cloud sync incomplete: ${results.pending} pending and ${results.failed} failed change(s) remain queued for this bakery. Your local data is preserved.`);
+    }
     localStorage.setItem("rozy-pos-last-sync", String(Date.now()));
     return results;
   } finally {
