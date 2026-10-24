@@ -270,8 +270,18 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
   // If any line fails validation or a write fails, Dexie rolls back the entire purchase.
   await db.transaction(
     "rw",
-    [db.purchases, db.products, db.batches, db.shopStock, db.stockMovements, db.auditLog],
+    [db.purchases, db.suppliers, db.products, db.batches, db.shopStock, db.stockMovements, db.auditLog],
     async () => {
+      // A purchase must not link to a supplier belonging to another shop.
+      // Verify inside the transaction so a missing or cross-shop supplier
+      // cannot be committed into the purchase ledger.
+      if (supplierId !== undefined && supplierId !== null && supplierId !== "") {
+        const supplier = await db.suppliers.get(supplierId);
+        if (!supplier || supplier.shopId !== shopId) {
+          throw new Error("Purchase supplier not found in the current shop");
+        }
+      }
+
       // Validate every product before writing anything.
       for (const it of items) {
         if (!await db.products.get(it.productId)) {
