@@ -486,44 +486,21 @@ export async function pushRecord(tableName, record) {
   await processQueue();
 }
 
-// ---------- BATCH PUSH ----------
-let batchQueue = new Map();
-let batchTimer = null;
-
+// ---------- DURABLE SCHEDULED PUSH ----------
+// Existing callers can ignore the returned promise, but critical callers should
+// await it. Queue writes are durable before any cloud network attempt.
 export function schedulePushBatch(tableName, record) {
-  if (!isSyncConfigured()) return;
-
-  if (!batchQueue.has(tableName)) {
-    batchQueue.set(tableName, new Map());
-  }
-  batchQueue.get(tableName).set(record.id, record);
-
-  if (batchTimer) clearTimeout(batchTimer);
-  batchTimer = setTimeout(flushBatch, 30000);
-}
-
-async function flushBatch() {
-  const snapshot = new Map(batchQueue);
-  batchQueue = new Map();
-
-  if (!isOnline()) {
-    for (const [tableName, records] of snapshot) {
-      for (const record of records.values()) {
-        await queueOperation(tableName, record.id, "upsert", record);
-      }
-    }
-    return;
-  }
-
-  for (const [tableName, records] of snapshot) {
-    try {
-      await pushTable(tableName, Array.from(records.values()));
-    } catch (e) {
-      for (const record of records.values()) {
-        await queueOperation(tableName, record.id, "upsert", record);
-      }
-    }
-  }
+  if (!isSyncConfigured()) return Promise.resolve();
+  const result = queueOperation(tableName, record?.id, "upsert", record)
+    .then(async () => {
+      if (isOnline()) await processQueue();
+    });
+  // Attach a rejection handler for legacy fire-and-forget callers, while
+  // preserving rejection for callers that await the returned promise.
+  result.catch((error) => {
+    console.error("Rozy POS: scheduled sync failed", error);
+  });
+  return result;
 }
 
 // ---------- QUEUE ----------
