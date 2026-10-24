@@ -1,6 +1,9 @@
 -- Rozy POS: shop-scoped RLS, fail closed. REVIEW AND BACK UP FIRST.
--- IMPORTANT: Each human/device must authenticate with an individual Supabase Auth
--- identity. A shared sync login cannot distinguish cashier from owner.
+-- SHARED ACCOUNT MODE: the owner deliberately uses one Supabase Auth account
+-- on all devices. RLS can reject anon requests, but cannot distinguish a cashier
+-- from the owner, nor enforce separation between the two shops for this owner.
+-- Do NOT represent the owner-only policies below as cashier-level protection.
+-- Staging only; review client write patterns before executing.
 -- This migration is intentionally NOT executed by CI.
 BEGIN;
 CREATE TABLE IF NOT EXISTS public.pos_shop_memberships (

@@ -498,7 +498,13 @@ export async function deleteRemote(tableName, id) {
   const config = SYNC_TABLES.find((t) => t.name === tableName);
   if (!config) throw new Error(`Unknown table ${tableName}`);
   if (!isOnline()) throw new Error("You are offline");
-  await sbFetch(`/${config.supabaseTable}?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
+  const shop = requiredShop();
+  // Restrict deletions to the selected bakery even when the shared cloud
+  // identity is an owner of both shops.
+  if (CHILD_PARENT[tableName]) {
+    throw new Error("Child deletes require parent-scoped server authorization and are disabled");
+  }
+  await sbFetch(`/${config.supabaseTable}?id=eq.${encodeURIComponent(id)}&shop_id=eq.${shop}`, { method: "DELETE" });
 }
 
 // ---------- DURABLE DELETE INTENT ----------
@@ -552,11 +558,18 @@ export async function queueOperation(tableName, recordId, action, data) {
   if (action === "upsert" && (!data || data.id !== recordId)) {
     throw new Error("Sync upsert requires matching record data");
   }
+  const shop = requiredShop();
+  if (action === "upsert" && !CHILD_PARENT[tableName] && data.shopId !== shop) {
+    throw new Error("Cannot queue a record belonging to a different bakery");
+  }
   return db.syncQueue.add({
     table: tableName,
     recordId,
     action,
     data,
+    // Bind the queued intent to its originating bakery. Switching shops
+    // must never reinterpret a queued operation under a different shop.
+    shopId: shop,
     status: "pending",
     createdAt: Date.now(),
     retries: 0,
@@ -579,8 +592,10 @@ export async function processQueue() {
     const attempted = new Set();
     while (isOnline()) {
       const operations = await db.syncQueue.toArray();
+      const shop = requiredShop();
       const ready = selectReadyQueueOperations(operations)
         .filter((op) => !attempted.has(op.id))
+        .filter((op) => op.shopId === shop)
         // A child may not be uploaded until any queued parent upsert is acknowledged.
         .filter((op) => {
           const parent = CHILD_PARENT[op.table];

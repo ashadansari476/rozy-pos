@@ -124,6 +124,9 @@ export async function pullProducts() {
   for (const r of remote) {
     const local = await db.products.get(r.id);
     const remoteUpdated = r.updated_at ? new Date(r.updated_at).getTime() : 0;
+    if (r.shop_id !== shop || (local && local.shopId !== shop)) {
+      throw new Error("Blocked cross-bakery product ID collision");
+    }
 
     if (!local) {
       await db.products.put({
@@ -233,6 +236,9 @@ export async function pullCategories() {
 
   for (const r of remote) {
     const local = await db.categories.get(r.id);
+    if (r.shop_id !== shop || (local && local.shopId !== shop)) {
+      throw new Error("Blocked cross-bakery category ID collision");
+    }
     if (!local) {
       await db.categories.put({
         id: r.id,
