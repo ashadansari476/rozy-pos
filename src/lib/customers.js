@@ -346,8 +346,8 @@ export async function deleteOrder(orderId) {
   }
 }
 
-export async function getAllOrders({ status, from, to } = {}) {
-  let all = await db.orders.where("shopId").equals(getCurrentShopId()).toArray();
+export async function getAllOrders({ status, from, to, shopId = getCurrentShopId() } = {}) {
+  let all = await db.orders.where("shopId").equals(shopId).toArray();
   if (status && status !== "all") {
     all = all.filter((o) => o.status === status);
   }
@@ -363,8 +363,8 @@ export async function getOrdersByCustomer(customerId) {
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
-export async function getOrderStats() {
-  const all = await db.orders.where("shopId").equals(getCurrentShopId()).toArray();
+export async function getOrderStats(shopId = getCurrentShopId()) {
+  const all = await db.orders.where("shopId").equals(shopId).toArray();
   const now = Date.now();
   const startOfDay = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
   const endOfDay = startOfDay + 24 * 60 * 60 * 1000;
