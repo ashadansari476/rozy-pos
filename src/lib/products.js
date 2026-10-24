@@ -1,6 +1,5 @@
 import { db } from "./db";
-import { pushSingleProduct } from "./supabase";
-import { pushRecord, isSyncConfigured, processQueue, queueOperation } from "./syncEngine";
+import { isSyncConfigured, processQueue, queueOperation } from "./syncEngine";
 
 // ============ PRODUCTS ============
 import { filterProductsForShop, productBelongsToShop } from "./productShopRules";
@@ -28,92 +27,52 @@ export async function getProduct(id) {
   return productBelongsToShop(product, localStorage.getItem("rozy-pos-current-shop") || "rozy") ? product : undefined;
 }
 
-// Helper — push a single shopStock record to cloud
-async function pushShopStock(shopId, productId) {
-  try {
-    const record = await db.shopStock
-      .where("[shopId+productId]")
-      .equals([shopId, productId])
-      .first();
-    if (!record) return;
-
-    pushRecord("shopStock", {
-      id: record.id,
-      shopId: record.shopId,
-      productId: record.productId,
-      stock: record.stock || 0,
-      lowStock: record.lowStock || 5,
-      updatedAt: Date.now(),
-    }).catch(() => {});
-  } catch (e) {
-    console.warn("Failed to push shopStock:", e.message);
+// Sync product and stock changes through the durable queue only.
+function flushProductQueue() {
+  if (isSyncConfigured() && typeof navigator !== "undefined" && navigator.onLine) {
+    processQueue().catch((error) => console.error("Product changes remain queued", error));
   }
 }
 
 export async function addProduct(product) {
   const now = Date.now();
   const shopId = localStorage.getItem("rozy-pos-current-shop") || "rozy";
-  const productId = await db.products.add({
-    ...product,
-    shopId,
-    createdAt: now,
-    updatedAt: now,
-    active: true,
+  const sync = isSyncConfigured();
+  let productId;
+  await db.transaction("rw", [db.products, db.shopStock, db.syncQueue], async () => {
+    const { id: ignoredId, shopId: ignoredShop, stock, lowStock, ...fields } = product;
+    const record = { ...fields, shopId, createdAt: now, updatedAt: now, active: true };
+    productId = await db.products.add(record);
+    if (sync) await queueOperation("products", productId, "upsert", { ...record, id: productId });
+    const stockRecord = { shopId, productId, stock: stock ?? 0, lowStock: lowStock ?? 5, updatedAt: now };
+    const stockId = await db.shopStock.add(stockRecord);
+    if (sync) await queueOperation("shopStock", stockId, "upsert", { ...stockRecord, id: stockId });
   });
-
-  // Create stock record for the current shop
-  await db.shopStock.add({
-    shopId,
-    productId,
-    stock: product.stock || 0,
-    lowStock: product.lowStock || 5,
-  });
-
-  // Push product + shopStock to cloud
-  pushSingleProduct(productId).catch(() => {});
-  pushShopStock(shopId, productId);
-
+  flushProductQueue();
   return productId;
 }
 
 export async function updateProduct(id, product) {
-  const { stock, lowStock, shopId: ignoredShopId, ...rest } = product;
+  const { stock, lowStock, shopId: ignoredShopId, id: ignoredId, ...rest } = product;
   const shopId = localStorage.getItem("rozy-pos-current-shop") || "rozy";
-  const existingProduct = await db.products.get(id);
-  if (!productBelongsToShop(existingProduct, shopId)) throw new Error("Product belongs to another shop");
-  await db.products.update(id, {
-    ...rest,
-    updatedAt: Date.now(),
-  });
-
-
-  // Update stock for current shop
-  if (stock !== undefined || lowStock !== undefined) {
-    const existing = await db.shopStock
-      .where("[shopId+productId]")
-      .equals([shopId, id])
-      .first();
-
-    if (existing) {
-      await db.shopStock.update(existing.id, {
-        ...(stock !== undefined ? { stock } : {}),
-        ...(lowStock !== undefined ? { lowStock } : {}),
-      });
-    } else {
-      await db.shopStock.add({
-        shopId,
-        productId: id,
-        stock: stock || 0,
-        lowStock: lowStock || 5,
-      });
+  const sync = isSyncConfigured();
+  const now = Date.now();
+  await db.transaction("rw", [db.products, db.shopStock, db.syncQueue], async () => {
+    const existingProduct = await db.products.get(id);
+    if (!productBelongsToShop(existingProduct, shopId)) throw new Error("Product belongs to another shop");
+    const updatedProduct = { ...existingProduct, ...rest, updatedAt: now };
+    await db.products.put(updatedProduct);
+    if (sync) await queueOperation("products", id, "upsert", updatedProduct);
+    if (stock !== undefined || lowStock !== undefined) {
+      const existing = await db.shopStock.where("[shopId+productId]").equals([shopId, id]).first();
+      const updatedStock = existing
+        ? { ...existing, ...(stock !== undefined ? { stock } : {}), ...(lowStock !== undefined ? { lowStock } : {}), updatedAt: now }
+        : { shopId, productId: id, stock: stock ?? 0, lowStock: lowStock ?? 5, updatedAt: now };
+      const stockId = await db.shopStock.put(updatedStock);
+      if (sync) await queueOperation("shopStock", stockId, "upsert", { ...updatedStock, id: stockId });
     }
-
-    // Push updated stock
-    pushShopStock(shopId, id);
-  }
-
-  // Push updated product to cloud
-  pushSingleProduct(id).catch(() => {});
+  });
+  flushProductQueue();
 }
 
 export async function deleteProduct(id) {
@@ -171,32 +130,26 @@ export async function deleteCategory(id) {
 export async function bulkImportProducts(rows) {
   const now = Date.now();
   const shopId = localStorage.getItem("rozy-pos-current-shop") || "rozy";
-
-  for (const r of rows) {
-    const productId = await db.products.add({
-      shopId,
-      name: r.name,
-      category: r.category || "Uncategorized",
-      unit: r.unit || "piece",
-      price: parseFloat(r.price) || 0,
-      cost: parseFloat(r.cost) || 0,
-      barcode: r.barcode || "",
-      variants: r.variants || [],
-      createdAt: now,
-      updatedAt: now,
-      active: true,
-    });
-
-    await db.shopStock.add({
-      shopId,
-      productId,
-      stock: parseFloat(r.stock) || 0,
-      lowStock: parseFloat(r.lowStock) || 5,
-    });
-
-    pushSingleProduct(productId).catch(() => {});
-    pushShopStock(shopId, productId);
-  }
+  const sync = isSyncConfigured();
+  await db.transaction("rw", [db.products, db.shopStock, db.syncQueue], async () => {
+    for (const r of rows) {
+      const record = {
+        shopId, name: r.name, category: r.category || "Uncategorized",
+        unit: r.unit || "piece", price: parseFloat(r.price) || 0,
+        cost: parseFloat(r.cost) || 0, barcode: r.barcode || "",
+        variants: r.variants || [], createdAt: now, updatedAt: now, active: true,
+      };
+      const productId = await db.products.add(record);
+      if (sync) await queueOperation("products", productId, "upsert", { ...record, id: productId });
+      const stockRecord = {
+        shopId, productId, stock: parseFloat(r.stock) || 0,
+        lowStock: parseFloat(r.lowStock) || 5, updatedAt: now,
+      };
+      const stockId = await db.shopStock.add(stockRecord);
+      if (sync) await queueOperation("shopStock", stockId, "upsert", { ...stockRecord, id: stockId });
+    }
+  });
+  flushProductQueue();
 }
 
 // ============ CSV HELPERS ============
