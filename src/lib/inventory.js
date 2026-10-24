@@ -10,6 +10,9 @@ async function queueInventoryRow(table, id) {
 }
 
 function flushInventoryQueue() {
+  // Wastage/expiry/purchases can call stock helpers from a larger transaction.
+  // Never send cloud requests before that outer transaction has committed.
+  if (Dexie.currentTransaction) return;
   if (isSyncConfigured() && typeof navigator !== "undefined" && navigator.onLine) {
     processQueue().catch((error) => console.error("Inventory cloud changes remain queued", error));
   }
