@@ -3,7 +3,7 @@
 // ============================================================
 
 import { db } from "./db";
-import { nextQueueFailure, shouldAttemptQueueOperation, retryFailedQueueOperation } from "./syncQueueRules";
+import { nextQueueFailure, selectReadyQueueOperations, retryFailedQueueOperation } from "./syncQueueRules";
 import { authHeaders } from "./supabaseAuth";
 import { getSupabaseUrl, getSupabaseKey } from "./supabase";
 
@@ -400,6 +400,12 @@ export async function pullTable(tableName, sinceTs) {
 
   // SPECIAL HANDLING: Categories sync by NAME to prevent duplicates
   if (tableName === "categories") {
+    // Category IDs are not stable across devices; do not merge while local
+    // category changes remain unsent.
+    const unsentCategories = await db.syncQueue.filter((op) =>
+      op.table === "categories" && (op.status === "pending" || op.status === "failed")
+    ).count();
+    if (unsentCategories) return { pulled: 0, updated: 0 };
     const localCategories = await db.categories.toArray();
     const localByName = {};
     for (const c of localCategories) {
@@ -535,10 +541,9 @@ export async function queueOperation(tableName, recordId, action, data) {
 export async function processQueue() {
   if (!isOnline()) return { processed: 0, failed: 0 };
 
-  const pending = (await db.syncQueue
-    .where("status")
-    .equals("pending")
-    .toArray()).filter((op) => shouldAttemptQueueOperation(op));
+  // Fetch all queue states so an older failed/deferred write can block newer
+  // operations for the same record. Otherwise a stale upsert can resurrect a delete.
+  const pending = selectReadyQueueOperations(await db.syncQueue.toArray());
 
   let processed = 0;
   let failed = 0;
