@@ -8,6 +8,7 @@ import { shouldApplyRemoteRecord } from "./syncConflictRules";
 import { verifyCloudUpsertResponse } from "./syncResponseRules";
 import { nextQueueFailure, selectReadyQueueOperations, retryFailedQueueOperation } from "./syncQueueRules";
 import { authHeaders } from "./supabaseAuth";
+import { serializeCloudRecord, deserializeCloudRecord } from "./syncPayloadRules";
 import { getSupabaseUrl, getSupabaseKey } from "./supabase";
 
 // ---------- Tables to sync ----------
@@ -234,41 +235,12 @@ const TABLE_LOCAL_ONLY = {
 
 // ---------- Field converters ----------
 function toCloud(localRecord, tableName) {
-  const map = FIELD_MAP[tableName] || {};
-  const out = {};
-  const tableLocal = TABLE_LOCAL_ONLY[tableName] || [];
-
-  for (const [k, v] of Object.entries(localRecord)) {
-    // Skip universal local-only fields
-    if (LOCAL_ONLY_FIELDS.includes(k)) continue;
-
-    // Skip table-specific local-only fields
-    if (tableLocal.includes(k)) continue;
-
-    const cloudKey = map[k] || k;
-
-    // Convert numeric timestamps to ISO strings
-    if ((cloudKey === "updated_at" || cloudKey === "created_at") && typeof v === "number") {
-      out[cloudKey] = new Date(v).toISOString();
-    } else {
-      out[cloudKey] = v;
-    }
-  }
-  return out;
+  return serializeCloudRecord(localRecord, tableName, FIELD_MAP[tableName] || {},
+    LOCAL_ONLY_FIELDS, TABLE_LOCAL_ONLY[tableName] || []);
 }
 
 function toLocal(cloudRecord, tableName) {
-  const map = FIELD_MAP[tableName] || {};
-  const reverse = {};
-  for (const [k, v] of Object.entries(map)) {
-    reverse[v] = k;
-  }
-  const out = {};
-  for (const [k, v] of Object.entries(cloudRecord)) {
-    const localKey = reverse[k] || k;
-    out[localKey] = v;
-  }
-  return out;
+  return deserializeCloudRecord(cloudRecord, tableName, FIELD_MAP[tableName] || {});
 }
 
 // ---------- Supabase fetch ----------
