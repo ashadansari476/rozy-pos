@@ -57,8 +57,14 @@ BEGIN
   ELSE
    EXECUTE format('CREATE POLICY pos_shop_insert ON public.%I FOR INSERT TO authenticated WITH CHECK (public.pos_has_shop_access(shop_id))',t);
   END IF;
-  EXECUTE format('CREATE POLICY pos_shop_update ON public.%I FOR UPDATE TO authenticated USING (public.pos_is_shop_owner(shop_id)) WITH CHECK (public.pos_is_shop_owner(shop_id))',t);
-  EXECUTE format('CREATE POLICY pos_shop_delete ON public.%I FOR DELETE TO authenticated USING (public.pos_is_shop_owner(shop_id))',t);
+  IF t NOT IN ('sales','payments','stock_movements','audit_log','purchases','wastage') THEN
+   EXECUTE format('CREATE POLICY pos_shop_update ON public.%I FOR UPDATE TO authenticated USING (public.pos_is_shop_owner(shop_id)) WITH CHECK (public.pos_is_shop_owner(shop_id))',t);
+  END IF;
+  -- Immutable financial/audit events cannot be deleted via browser REST, even by an owner.
+  -- Corrections must be new reversal events with a durable audit trail.
+  IF t NOT IN ('sales','payments','stock_movements','audit_log','purchases','wastage') THEN
+   EXECUTE format('CREATE POLICY pos_shop_delete ON public.%I FOR DELETE TO authenticated USING (public.pos_is_shop_owner(shop_id))',t);
+  END IF;
  END LOOP;
 END $$;
 -- Financial event records should never be silently deleted by a cashier.
