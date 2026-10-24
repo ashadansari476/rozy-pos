@@ -216,18 +216,18 @@ export async function addBatch({ productId, qty, expiryDate, cost, batchNo, user
   return batchId;
 }
 
-export async function getExpiringBatches(daysAhead = 3) {
+export async function getExpiringBatches(daysAhead = 3, shopId = getCurrentShopId()) {
   const now = Date.now();
   const cutoff = now + daysAhead * 24 * 60 * 60 * 1000;
-  const all = await db.batches.where("shopId").equals(getCurrentShopId()).toArray();
+  const all = await db.batches.where("shopId").equals(shopId).toArray();
   return all
     .filter((b) => b.active && b.expiryDate && b.expiryDate <= cutoff && b.qty > 0)
     .sort((a, b) => a.expiryDate - b.expiryDate);
 }
 
-export async function getExpiredBatches() {
+export async function getExpiredBatches(shopId = getCurrentShopId()) {
   const now = Date.now();
-  const all = await db.batches.where("shopId").equals(getCurrentShopId()).toArray();
+  const all = await db.batches.where("shopId").equals(shopId).toArray();
   return all.filter((b) => b.active && b.expiryDate && b.expiryDate < now && b.qty > 0);
 }
 
@@ -301,8 +301,8 @@ export async function deleteSupplier(id) {
   return result;
 }
 
-export async function getAllSuppliers() {
-  return await db.suppliers.where("shopId").equals(getCurrentShopId()).toArray();
+export async function getAllSuppliers(shopId = getCurrentShopId()) {
+  return await db.suppliers.where("shopId").equals(shopId).toArray();
 }
 
 // ============ PURCHASES ============
@@ -413,8 +413,8 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
   return { purchaseId, total };
 }
 
-export async function getPurchases({ from, to, supplierId } = {}) {
-  const all = await db.purchases.where("shopId").equals(getCurrentShopId()).toArray();
+export async function getPurchases({ from, to, supplierId, shopId = getCurrentShopId() } = {}) {
+  const all = await db.purchases.where("shopId").equals(shopId).toArray();
   return all
     .filter((p) => {
       if (from && p.ts < from) return false;
@@ -427,8 +427,8 @@ export async function getPurchases({ from, to, supplierId } = {}) {
 
 // ============ STOCK MOVEMENTS ============
 
-export async function getMovements({ productId, from, to, limit = 100 } = {}) {
-  const all = await db.stockMovements.where("shopId").equals(getCurrentShopId()).toArray();
+export async function getMovements({ productId, from, to, limit = 100, shopId = getCurrentShopId() } = {}) {
+  const all = await db.stockMovements.where("shopId").equals(shopId).toArray();
   return all
     .filter((m) => {
       if (productId && m.productId !== productId) return false;
