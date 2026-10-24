@@ -33,3 +33,17 @@ export function validatePurchaseItems(items) {
 
   return totalPaise / 100;
 }
+
+
+/**
+ * HTML <select> always returns string IDs; IndexedDB supplier IDs are numbers.
+ * Normalize once so a saved supplier is looked up and synced correctly.
+ */
+export function normalizePurchaseSupplierId(raw) {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const id = Number(raw);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new Error("Select a valid supplier for this bakery");
+  }
+  return id;
+}
