@@ -1,11 +1,21 @@
 import { db, getDeviceTag } from "./db";
-import { pushRecord } from "./syncEngine";
+import { pushRecord, isSyncConfigured, queueOperation, processQueue } from "./syncEngine";
 
 // Helper — get current shop ID
 function getCurrentShopId() {
   const shop = localStorage.getItem("rozy-pos-current-shop");
   if (shop !== "rozy" && shop !== "warish") throw new Error("Select a valid bakery");
   return shop;
+}
+
+async function queueSavedChanges(changes) {
+  if (!isSyncConfigured()) return;
+  for (const { table, id } of changes) {
+    if (id == null) continue;
+    const record = await db.table(table).get(id);
+    if (record) await queueOperation(table, id, "upsert", record);
+  }
+  processQueue().catch((err) => console.error("Cloud sync changes remain queued", err));
 }
 
 // ============ CUSTOMERS ============
@@ -166,8 +176,9 @@ export async function createOrder({
     updatedAt: now,
   });
 
+  let advancePaymentId;
   if (advanceAmount > 0) {
-    await db.payments.add({
+    advancePaymentId = await db.payments.add({
       shopId,
       orderId,
       ts: now,
@@ -177,7 +188,7 @@ export async function createOrder({
     });
   }
 
-  await db.auditLog.add({
+  const createdAuditId = await db.auditLog.add({
     shopId,
     ts: now,
     userName: user || "system",
@@ -187,8 +198,7 @@ export async function createOrder({
     details: { orderNo, totalAmount, advanceAmount },
   });
 
-  // Upload the entire saved record; partial payloads are invalid under shop RLS.
-  pushRecord("orders", await db.orders.get(orderId)).catch(() => {});
+  await queueSavedChanges([{ table: "orders", id: orderId }, { table: "payments", id: advancePaymentId }, { table: "auditLog", id: createdAuditId }]);
 
   import("../stores/syncStore").then(({ useSync }) => {
     useSync.getState().sync();
@@ -213,7 +223,7 @@ export async function updateOrderStatus(orderId, status, user) {
   if (!order || order.shopId !== shopId) throw new Error("Order does not belong to the selected bakery");
   await db.orders.update(orderId, { status, updatedAt: now });
 
-  await db.auditLog.add({
+  const statusAuditId = await db.auditLog.add({
     shopId,
     ts: now,
     userName: user || "system",
@@ -223,7 +233,7 @@ export async function updateOrderStatus(orderId, status, user) {
     details: { status },
   });
 
-  pushRecord("orders", await db.orders.get(orderId)).catch(() => {});
+  await queueSavedChanges([{ table: "orders", id: orderId }, { table: "auditLog", id: statusAuditId }]);
 }
 
 export async function recordOrderPayment(orderId, amount, type = "balance", user) {
@@ -241,7 +251,7 @@ export async function recordOrderPayment(orderId, amount, type = "balance", user
     updatedAt: now,
   });
 
-  await db.payments.add({
+  const paymentId = await db.payments.add({
     shopId,
     orderId,
     ts: now,
@@ -249,6 +259,7 @@ export async function recordOrderPayment(orderId, amount, type = "balance", user
     amount,
     note: type === "balance" ? "Balance payment" : "Additional payment",
   });
+  await queueSavedChanges([{ table: "orders", id: orderId }, { table: "payments", id: paymentId }]);
 }
 
 export async function deleteOrder(orderId) {
