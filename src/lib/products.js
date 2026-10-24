@@ -120,21 +120,42 @@ export async function getCategories() {
 
 export async function addCategory({ name, icon }) {
   const shopId = currentShop();
-  const count = (await getCategories()).length;
-  return db.categories.add({ shopId, name, icon: icon || "📦", sortOrder: count + 1 });
+  const sync = isSyncConfigured();
+  let id;
+  await db.transaction("rw", [db.categories, db.syncQueue], async () => {
+    const count = (await db.categories.toArray()).filter((c) => (c.shopId || "rozy") === shopId).length;
+    const record = { shopId, name, icon: icon || "📦", sortOrder: count + 1, updatedAt: Date.now() };
+    id = await db.categories.add(record);
+    if (sync) await queueOperation("categories", id, "upsert", { ...record, id });
+  });
+  flushProductQueue();
+  return id;
 }
 
 export async function updateCategory(id, data) {
-  const category = await db.categories.get(id);
-  if (!category || (category.shopId || "rozy") !== currentShop()) throw new Error("Category belongs to another shop");
-  const { id: ignoredId, shopId: ignoredShop, ...safe } = data;
-  return db.categories.update(id, safe);
+  const sync = isSyncConfigured();
+  let result;
+  await db.transaction("rw", [db.categories, db.syncQueue], async () => {
+    const category = await db.categories.get(id);
+    if (!category || (category.shopId || "rozy") !== currentShop()) throw new Error("Category belongs to another shop");
+    const { id: ignoredId, shopId: ignoredShop, ...safe } = data;
+    const record = { ...category, ...safe, updatedAt: Date.now() };
+    result = await db.categories.put(record);
+    if (sync) await queueOperation("categories", id, "upsert", record);
+  });
+  flushProductQueue();
+  return result;
 }
 
 export async function deleteCategory(id) {
-  const category = await db.categories.get(id);
-  if (!category || (category.shopId || "rozy") !== currentShop()) throw new Error("Category belongs to another shop");
-  return db.categories.delete(id);
+  const sync = isSyncConfigured();
+  await db.transaction("rw", [db.categories, db.syncQueue], async () => {
+    const category = await db.categories.get(id);
+    if (!category || (category.shopId || "rozy") !== currentShop()) throw new Error("Category belongs to another shop");
+    if (sync) await queueOperation("categories", id, "delete");
+    await db.categories.delete(id);
+  });
+  flushProductQueue();
 }
 
 // ============ BULK IMPORT ============
