@@ -328,9 +328,11 @@ export async function completeOrder({
   const order = await db.orders.get(orderId);
   if (!order) throw new Error("Order not found");
   if (order.status === "delivered") throw new Error("Order already delivered");
+  if (order.shopId !== getCurrentShopId()) throw new Error("Order does not belong to the selected bakery");
 
   const now = Date.now();
   const shopId = counter.toLowerCase();
+  if (shopId !== order.shopId) throw new Error("Cannot deliver an order for a different bakery");
 
   const prefix = counter === "Rozy" ? "RZ" : counter === "Warish" ? "WR" : "GN";
   const seqKey = `billSeq_${counter}`;
@@ -369,8 +371,11 @@ export async function completeOrder({
     updatedAt: now,
   });
 
+  const createdItems = [];
+  const changedStocks = [];
+  const createdMovements = [];
   for (const it of order.items) {
-    await db.saleItems.add({
+    const saleItemId = await db.saleItems.add({
       saleId,
       productId: it.productId,
       name: it.productName,
@@ -379,6 +384,7 @@ export async function completeOrder({
       price: it.price,
       lineTotal: it.lineTotal,
     });
+    createdItems.push(saleItemId);
 
     // Deduct from shopStock
     const existing = await db.shopStock
@@ -389,8 +395,9 @@ export async function completeOrder({
     if (existing) {
       const newStock = Math.max(0, (existing.stock || 0) - it.qty);
       await db.shopStock.update(existing.id, { stock: newStock });
+      changedStocks.push(existing.id);
 
-      await db.stockMovements.add({
+      const movementId = await db.stockMovements.add({
         shopId,
         ts: now,
         productId: it.productId,
@@ -403,11 +410,13 @@ export async function completeOrder({
         userName: user || "system",
         balanceAfter: newStock,
       });
+      createdMovements.push(movementId);
     }
   }
 
+  let balancePaymentId;
   if (paymentAmount > 0) {
-    await db.payments.add({
+    balancePaymentId = await db.payments.add({
       shopId,
       orderId,
       ts: now,
@@ -439,7 +448,7 @@ export async function completeOrder({
     }
   }
 
-  await db.auditLog.add({
+  const completedAuditId = await db.auditLog.add({
     shopId,
     ts: now,
     userName: user || "system",
@@ -449,9 +458,16 @@ export async function completeOrder({
     details: { orderNo: order.orderNo, billNo, totalPaid, paymentMode },
   });
 
-  import("../stores/syncStore").then(({ useSync }) => {
-    useSync.getState().sync();
-  }).catch(() => {});
+  await queueSavedChanges([
+    { table: "orders", id: orderId },
+    { table: "sales", id: saleId },
+    ...createdItems.map((id) => ({ table: "saleItems", id })),
+    ...changedStocks.map((id) => ({ table: "shopStock", id })),
+    ...createdMovements.map((id) => ({ table: "stockMovements", id })),
+    { table: "payments", id: balancePaymentId },
+    { table: "customers", id: order.customerId },
+    { table: "auditLog", id: completedAuditId },
+  ]);
 
   return { billNo, saleId, change };
 }
