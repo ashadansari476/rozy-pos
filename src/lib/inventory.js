@@ -259,36 +259,43 @@ export async function markBatchExpired(batchId, user) {
 export async function addSupplier(supplier) {
   const shopId = getCurrentShopId();
   const { id: _ignoredId, shopId: _ignoredShop, ...details } = supplier || {};
-  return await db.suppliers.add({
-    ...details,
-    shopId,
-    createdAt: Date.now(),
+  const id = await db.transaction("rw", [db.suppliers, db.syncQueue], async () => {
+    const created = await db.suppliers.add({ ...details, shopId, createdAt: Date.now() });
+    await queueInventoryRow("suppliers", created);
+    return created;
   });
+  flushInventoryQueue();
+  return id;
 }
 
 export async function updateSupplier(id, data) {
   const shopId = getCurrentShopId();
-  return db.transaction("rw", db.suppliers, async () => {
+  const result = await db.transaction("rw", [db.suppliers, db.syncQueue], async () => {
     const supplier = await db.suppliers.get(id);
     if (!supplier || supplier.shopId !== shopId) {
       throw new Error("Supplier not found in the current shop");
     }
-    // Never allow a generic update payload to move a supplier between shops
-    // or replace its primary key.
     const { id: _ignoredId, shopId: _ignoredShop, ...changes } = data || {};
-    return db.suppliers.update(id, { ...changes, updatedAt: Date.now() });
+    const updated = await db.suppliers.update(id, { ...changes, updatedAt: Date.now() });
+    await queueInventoryRow("suppliers", id);
+    return updated;
   });
+  flushInventoryQueue();
+  return result;
 }
 
 export async function deleteSupplier(id) {
   const shopId = getCurrentShopId();
-  return db.transaction("rw", db.suppliers, async () => {
+  const result = await db.transaction("rw", [db.suppliers, db.syncQueue], async () => {
     const supplier = await db.suppliers.get(id);
     if (!supplier || supplier.shopId !== shopId) {
       throw new Error("Supplier not found in the current shop");
     }
+    if (isSyncConfigured()) await queueOperation("suppliers", id, "delete");
     return db.suppliers.delete(id);
   });
+  flushInventoryQueue();
+  return result;
 }
 
 export async function getAllSuppliers() {
@@ -308,7 +315,7 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
   // If any line fails validation or a write fails, Dexie rolls back the entire purchase.
   await db.transaction(
     "rw",
-    [db.purchases, db.suppliers, db.products, db.batches, db.shopStock, db.stockMovements, db.auditLog],
+    [db.purchases, db.purchaseItems, db.suppliers, db.products, db.batches, db.shopStock, db.stockMovements, db.auditLog, db.syncQueue],
     async () => {
       // A purchase must not link to a supplier belonging to another shop.
       // Verify inside the transaction so a missing or cross-shop supplier
@@ -322,8 +329,9 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
 
       // Validate every product before writing anything.
       for (const it of items) {
-        if (!await db.products.get(it.productId)) {
-          throw new Error(`Product not found: ${it.productName || it.productId}`);
+        const product = await db.products.get(it.productId);
+        if (!product || product.shopId !== shopId) {
+          throw new Error(`Product not found in the selected bakery: ${it.productName || it.productId}`);
         }
       }
 
@@ -351,8 +359,19 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
         note: note || "",
         userName: user || "system",
       });
+      await queueInventoryRow("purchases", purchaseId);
 
       for (const it of items) {
+        const purchaseItemId = await db.purchaseItems.add({
+          purchaseId,
+          productId: it.productId,
+          productName: it.productName,
+          qty: it.qty,
+          unit: it.unit,
+          cost: it.cost,
+          lineTotal: it.qty * it.cost,
+        });
+        await queueInventoryRow("purchaseItems", purchaseItemId);
         await adjustStock({
           productId: it.productId,
           qty: it.qty,
@@ -366,9 +385,10 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
           cost: it.cost,
           updatedAt: Date.now(),
         });
+        await queueInventoryRow("products", it.productId);
 
         if (it.expiryDate) {
-          await db.batches.add({
+          const batchId = await db.batches.add({
             shopId,
             productId: it.productId,
             productName: it.productName,
@@ -380,11 +400,13 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
             ts: Date.now(),
             active: true,
           });
+          await queueInventoryRow("batches", batchId);
         }
       }
     }
   );
 
+  flushInventoryQueue();
   return { purchaseId, total };
 }
 
