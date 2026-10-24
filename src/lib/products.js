@@ -3,13 +3,15 @@ import { pushSingleProduct } from "./supabase";
 import { pushRecord, isSyncConfigured, processQueue, queueOperation } from "./syncEngine";
 
 // ============ PRODUCTS ============
+import { filterProductsForShop, productBelongsToShop } from "./productShopRules";
+
 
 export async function getAllProducts() {
-  return await db.products.toArray();
+  return filterProductsForShop(await db.products.toArray(), localStorage.getItem("rozy-pos-current-shop") || "rozy");
 }
 
 export async function getProductsWithStock(shopId) {
-  const products = await db.products.toArray();
+  const products = filterProductsForShop(await db.products.toArray(), shopId);
   const stocks = await db.shopStock.where("shopId").equals(shopId).toArray();
   const stockMap = {};
   for (const s of stocks) stockMap[s.productId] = s;
@@ -22,7 +24,8 @@ export async function getProductsWithStock(shopId) {
 }
 
 export async function getProduct(id) {
-  return await db.products.get(id);
+  const product = await db.products.get(id);
+  return productBelongsToShop(product, localStorage.getItem("rozy-pos-current-shop") || "rozy") ? product : undefined;
 }
 
 // Helper — push a single shopStock record to cloud
@@ -49,15 +52,16 @@ async function pushShopStock(shopId, productId) {
 
 export async function addProduct(product) {
   const now = Date.now();
+  const shopId = localStorage.getItem("rozy-pos-current-shop") || "rozy";
   const productId = await db.products.add({
     ...product,
+    shopId,
     createdAt: now,
     updatedAt: now,
     active: true,
   });
 
   // Create stock record for the current shop
-  const shopId = localStorage.getItem("rozy-pos-current-shop") || "rozy";
   await db.shopStock.add({
     shopId,
     productId,
@@ -73,13 +77,15 @@ export async function addProduct(product) {
 }
 
 export async function updateProduct(id, product) {
-  const { stock, lowStock, ...rest } = product;
+  const { stock, lowStock, shopId: ignoredShopId, ...rest } = product;
+  const shopId = localStorage.getItem("rozy-pos-current-shop") || "rozy";
+  const existingProduct = await db.products.get(id);
+  if (!productBelongsToShop(existingProduct, shopId)) throw new Error("Product belongs to another shop");
   await db.products.update(id, {
     ...rest,
     updatedAt: Date.now(),
   });
 
-  const shopId = localStorage.getItem("rozy-pos-current-shop") || "rozy";
 
   // Update stock for current shop
   if (stock !== undefined || lowStock !== undefined) {
@@ -113,7 +119,9 @@ export async function updateProduct(id, product) {
 export async function deleteProduct(id) {
   const sync = isSyncConfigured();
   await db.transaction("rw", [db.products, db.syncQueue], async () => {
-    if (!await db.products.get(id)) return;
+    const existing = await db.products.get(id);
+    if (!existing) return;
+    if (!productBelongsToShop(existing, localStorage.getItem("rozy-pos-current-shop") || "rozy")) throw new Error("Product belongs to another shop");
     // The delete intent and local deletion commit together, even while offline.
     if (sync) await queueOperation("products", id, "delete");
     await db.products.delete(id);
@@ -124,7 +132,7 @@ export async function deleteProduct(id) {
 }
 
 export async function searchProducts(query, category) {
-  let products = await db.products.toArray();
+  let products = filterProductsForShop(await db.products.toArray(), localStorage.getItem("rozy-pos-current-shop") || "rozy");
   if (category && category !== "All") {
     products = products.filter((p) => p.category === category);
   }
@@ -166,6 +174,7 @@ export async function bulkImportProducts(rows) {
 
   for (const r of rows) {
     const productId = await db.products.add({
+      shopId,
       name: r.name,
       category: r.category || "Uncategorized",
       unit: r.unit || "piece",

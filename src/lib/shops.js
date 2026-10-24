@@ -1,6 +1,7 @@
 import { isSyncConfigured, processQueue, queueOperation } from "./syncEngine";
 import { db } from "./db";
 import { hashPass } from "./users";
+import { filterProductsForShop } from "./productShopRules";
 
 // ---------- Shop settings ----------
 export async function getAllShops() {
@@ -103,7 +104,7 @@ export async function adjustShopStock(shopId, productId, delta) {
 
 // ---------- List products with stock for a shop ----------
 export async function getProductsWithStock(shopId) {
-  const products = await db.products.toArray();
+  const products = filterProductsForShop(await db.products.toArray(), shopId);
   const stocks = await getAllShopStock(shopId);
   const stockMap = {};
   for (const s of stocks) stockMap[s.productId] = s;
