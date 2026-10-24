@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { validatePurchaseItems } from "./src/lib/inventoryRules.js";
+import { validatePurchaseItems, normalizePurchaseSupplierId } from "./src/lib/inventoryRules.js";
 
 const item = (qty, cost) => ({ productId: 1, qty, cost });
 
@@ -32,4 +32,13 @@ test("purchase rejects non-finite computed line amounts", () => {
 test("purchase rejects non-finite quantities and costs", () => {
   assert.throws(() => validatePurchaseItems([item(Infinity, 2)]), /positive/);
   assert.throws(() => validatePurchaseItems([item(1, NaN)]), /non-negative/);
+});
+
+test("saved supplier selection uses numeric IndexedDB key rather than HTML select string", () => {
+  assert.equal(normalizePurchaseSupplierId("16000001"), 16000001);
+  assert.equal(normalizePurchaseSupplierId(16000001), 16000001);
+  assert.equal(normalizePurchaseSupplierId(""), null);
+  assert.equal(normalizePurchaseSupplierId(null), null);
+  assert.throws(() => normalizePurchaseSupplierId("not-an-id"), /valid supplier/);
+  assert.throws(() => normalizePurchaseSupplierId("-1"), /valid supplier/);
 });
