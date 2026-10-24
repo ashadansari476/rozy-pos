@@ -70,7 +70,7 @@ db.version(8).stores({
 // Old records keep their old small ids; only NEW records use the block.
 const ID_BLOCK = 2_000_000;
 const ID_TABLES = [
-  "products", "sales", "saleItems", "customers", "orders", "orderItems", "expenses",
+  "products", "categories", "sales", "saleItems", "customers", "orders", "orderItems", "expenses",
   "targets", "cashDrawer", "auditLog", "stockMovements", "wastage", "suppliers",
   "purchases", "purchaseItems", "shopStock", "users", "batches", "payments",
 ];
