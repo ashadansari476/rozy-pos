@@ -331,6 +331,35 @@ function requiredShop() {
   return shop;
 }
 
+// Preflight against the actual cloud ID namespace, not only local IndexedDB.
+// A shared owner can access both bakeries, so shop-scoped RLS alone cannot
+// prevent an upsert from changing the shop_id of an already existing ID.
+async function assertRemoteIdOwnership(tableName, config, records, shop) {
+  const child = CHILD_PARENT[tableName];
+  const column = child ? child.column : "shop_id";
+  const expected = new Map(records.map((r) => [String(r.id), r]));
+  for (let start = 0; start < records.length; start += 100) {
+    const ids = records.slice(start, start + 100)
+      .map((r) => encodeURIComponent(String(r.id))).join(",");
+    const remote = await sbFetch(
+      `/${config.supabaseTable}?select=id,${column}&id=in.(${ids})`
+    );
+    if (!Array.isArray(remote)) throw new Error("Cloud ID collision check returned invalid data");
+    for (const row of remote) {
+      const ours = expected.get(String(row.id));
+      if (!ours) throw new Error("Cloud ID collision check returned an unknown record");
+      if (child) {
+        const parentKey = child.column.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+        if (String(row[column]) !== String(ours[parentKey])) {
+          throw new Error(`Blocked ${tableName} upload: cloud ID ${row.id} belongs to a different parent`);
+        }
+      } else if (row.shop_id !== shop) {
+        throw new Error(`Blocked ${tableName} upload: cloud ID ${row.id} belongs to ${row.shop_id}`);
+      }
+    }
+  }
+}
+
 // ---------- PUSH ----------
 export async function pushTable(tableName, records) {
   if (!records.length) return { pushed: 0 };
@@ -376,6 +405,8 @@ export async function pushTable(tableName, records) {
   });
 
   const normalized = normalizeBatch(payload);
+  // Fail safely on known remote ID collisions before PostgreSQL UPSERT.
+  await assertRemoteIdOwnership(tableName, config, records, requiredShop());
 
   const response = await sbFetch(`/${config.supabaseTable}`, {
     method: "POST",
