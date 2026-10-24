@@ -131,6 +131,14 @@ export async function getWastage({ from, to, shopId = getCurrentShopId() } = {})
 // ============ EXPIRY / BATCHES ============
 
 export async function addBatch({ productId, qty, expiryDate, cost, batchNo, user }) {
+  // A batch is an inbound stock movement. Invalid quantities must not create
+  // stock, leave zero-quantity batches, or bypass inventory accounting.
+  if (!Number.isFinite(qty) || qty <= 0) {
+    throw new Error("Batch quantity must be a positive finite number");
+  }
+  if (cost !== undefined && cost !== null && (!Number.isFinite(cost) || cost < 0)) {
+    throw new Error("Batch unit cost must be a non-negative finite number");
+  }
   const product = await db.products.get(productId);
   if (!product) throw new Error("Product not found");
 
