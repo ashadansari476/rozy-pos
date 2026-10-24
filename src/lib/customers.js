@@ -3,7 +3,9 @@ import { pushRecord } from "./syncEngine";
 
 // Helper — get current shop ID
 function getCurrentShopId() {
-  return localStorage.getItem("rozy-pos-current-shop") || "rozy";
+  const shop = localStorage.getItem("rozy-pos-current-shop");
+  if (shop !== "rozy" && shop !== "warish") throw new Error("Select a valid bakery");
+  return shop;
 }
 
 // ============ CUSTOMERS ============
@@ -11,6 +13,7 @@ function getCurrentShopId() {
 export async function addCustomer({ name, phone, address, notes, birthday }) {
   const now = Date.now();
   const id = await db.customers.add({
+    shopId: getCurrentShopId(),
     name: name.trim(),
     phone: (phone || "").trim(),
     address: (address || "").trim(),
@@ -23,27 +26,18 @@ export async function addCustomer({ name, phone, address, notes, birthday }) {
     lastVisit: now,
   });
 
-  pushRecord("customers", {
-    id,
-    name: name.trim(),
-    phone: (phone || "").trim(),
-    address: (address || "").trim(),
-    notes: (notes || "").trim(),
-    birthday: birthday || null,
-    createdAt: now,
-    updatedAt: now,
-    totalSpent: 0,
-    totalOrders: 0,
-    lastVisit: now,
-  }).catch(() => {});
+  pushRecord("customers", await db.customers.get(id)).catch(() => {});
 
   return id;
 }
 
 export async function updateCustomer(id, data) {
   const now = Date.now();
-  const result = await db.customers.update(id, { ...data, updatedAt: now });
-  pushRecord("customers", { id, ...data, updatedAt: now }).catch(() => {});
+  const existing = await db.customers.get(id);
+  if (!existing || existing.shopId !== getCurrentShopId()) throw new Error("Customer does not belong to the selected bakery");
+  const { shopId: _ignored, id: _ignoredId, ...safeData } = data;
+  const result = await db.customers.update(id, { ...safeData, updatedAt: now });
+  pushRecord("customers", await db.customers.get(id)).catch(() => {});
   return result;
 }
 
@@ -193,27 +187,8 @@ export async function createOrder({
     details: { orderNo, totalAmount, advanceAmount },
   });
 
-  pushRecord("orders", {
-    id: orderId,
-    shopId,
-    orderNo,
-    customerId: customerId || null,
-    customerName: customerName || "Walk-in",
-    customerPhone: customerPhone || "",
-    totalAmount,
-    advanceAmount: advanceAmount || 0,
-    balanceAmount: totalAmount - (advanceAmount || 0),
-    deliveryDate: deliveryDate ? new Date(deliveryDate).getTime() : now,
-    notes: notes || "",
-    orderType: orderType || "pickup",
-    address: address || "",
-    status: "pending",
-    channel: channel || "pos",
-    source: source || "pos",
-    createdAtTs: now,
-    createdBy: user || "system",
-    updatedAt: now,
-  }).catch(() => {});
+  // Upload the entire saved record; partial payloads are invalid under shop RLS.
+  pushRecord("orders", await db.orders.get(orderId)).catch(() => {});
 
   import("../stores/syncStore").then(({ useSync }) => {
     useSync.getState().sync();
@@ -223,12 +198,19 @@ export async function createOrder({
 }
 
 export async function updateOrder(orderId, data) {
-  return await db.orders.update(orderId, { ...data, updatedAt: Date.now() });
+  const existing = await db.orders.get(orderId);
+  if (!existing || existing.shopId !== getCurrentShopId()) throw new Error("Order does not belong to the selected bakery");
+  const { shopId: _ignored, id: _ignoredId, ...safeData } = data;
+  const updated = await db.orders.update(orderId, { ...safeData, updatedAt: Date.now() });
+  pushRecord("orders", await db.orders.get(orderId)).catch(() => {});
+  return updated;
 }
 
 export async function updateOrderStatus(orderId, status, user) {
   const now = Date.now();
   const shopId = getCurrentShopId();
+  const order = await db.orders.get(orderId);
+  if (!order || order.shopId !== shopId) throw new Error("Order does not belong to the selected bakery");
   await db.orders.update(orderId, { status, updatedAt: now });
 
   await db.auditLog.add({
@@ -241,12 +223,13 @@ export async function updateOrderStatus(orderId, status, user) {
     details: { status },
   });
 
-  pushRecord("orders", { id: orderId, status, updatedAt: now }).catch(() => {});
+  pushRecord("orders", await db.orders.get(orderId)).catch(() => {});
 }
 
 export async function recordOrderPayment(orderId, amount, type = "balance", user) {
   const order = await db.orders.get(orderId);
   if (!order) return;
+  if (order.shopId !== getCurrentShopId()) throw new Error("Order does not belong to the selected bakery");
 
   const now = Date.now();
   const shopId = getCurrentShopId();
