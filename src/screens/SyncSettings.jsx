@@ -5,7 +5,7 @@ import {
   clearSupabaseConfig, testConnection, getSyncStatus,
 } from "../lib/supabase";
 import { Cloud, Check, X, RefreshCw, Save, AlertTriangle } from "lucide-react";
-import { fullSync } from "../lib/syncEngine";
+import { fullSync, processQueue, getSyncQueueStatus, retryFailedSyncOperation } from "../lib/syncEngine";
 import { getSyncAccount, signInSync, signOutSync } from "../lib/supabaseAuth";
 
 export default function SyncSettings() {
@@ -72,43 +72,27 @@ export default function SyncSettings() {
     setSyncing(false);
   };
 
-  const handleForceResync = async () => {
-    if (!confirm(
-      "⚠️ FORCE FULL RESYNC\n\n" +
-      "This will:\n" +
-      "1. Clear the sync timestamp\n" +
-      "2. Clear failed sync queue\n" +
-      "3. Push ALL local records to cloud\n" +
-      "4. Pull all cloud records\n\n" +
-      "Use when devices are out of sync.\n\n" +
-      "Continue?"
-    )) return;
-
+  const handleRetryFailed = async () => {
+    const status = await getSyncQueueStatus();
+    if (!status.failed) {
+      alert("No failed sync operations to retry. Pending operations are preserved.");
+      return;
+    }
+    if (!confirm(`Retry ${status.failed} failed sync operation(s)? No unsynced data will be deleted.`)) return;
     setSyncing(true);
     try {
       const { db } = await import("../lib/db");
-      const { fullSync: fullSyncFn } = await import("../lib/syncEngine");
-
-      // Clear failed queue
-      await db.syncQueue.clear();
-
-      // Reset last sync timestamp to force full push
-      localStorage.removeItem("rozy-pos-last-sync");
-
-      // Force full sync
-      const result = await fullSyncFn();
-
-      alert(
-        `✅ Force resync complete!\n\n` +
-        `Pushed: ${result.pushed || 0}\n` +
-        `Pulled: ${result.pulled || 0}\n` +
-        `Updated: ${result.updated || 0}`
-      );
+      // Read full failure records privately; the status summary is display-only.
+      const failed = await db.syncQueue.where("status").equals("failed").toArray();
+      for (const op of failed) await retryFailedSyncOperation(op.id);
+      const result = await processQueue();
+      alert(`Retry finished. Processed: ${result.processed}, failed: ${result.failed}. Other pending operations remain queued.`);
       await refreshStatus();
     } catch (e) {
-      alert("Force resync failed: " + e.message);
+      alert("Retry failed: " + e.message);
+    } finally {
+      setSyncing(false);
     }
-    setSyncing(false);
   };
 
   const handleSignIn = async () => {
@@ -251,7 +235,7 @@ export default function SyncSettings() {
           <p className="text-xs text-ink-muted mb-4">
             {account
               ? `Signed in as ${account.email}. Your cloud data is protected by this login.`
-              : "Not signed in: only the public key protects your cloud data. Create one user in Supabase (Authentication, Users), sign in here on every device, then run supabase-security.sql once."}
+              : "Not signed in. Cloud access requires the shared Supabase Auth owner account configured for both bakeries. The publishable key alone does not grant access."}
           </p>
           {account ? (
             <button onClick={handleSignOut} className="btn-outline">Sign out of sync account</button>
@@ -287,13 +271,13 @@ export default function SyncSettings() {
         </div>
       )}
 
-      {/* Sync Now + Force Resync */}
+      {/* Standard sync + safe retry */}
       {status?.connected && (
         <div className="card p-5 mb-5">
           <h2 className="font-semibold text-ink mb-2">Sync</h2>
           <p className="text-xs text-ink-muted mb-4">
-            <b>Sync Now:</b> Standard bidirectional sync.<br />
-            <b>Force Resync:</b> Push ALL local data + pull all cloud data. Use if devices show different numbers.
+            <b>Sync Now:</b> Process queued changes and pull shop records; it does not upload all historical local records.<br />
+            <b>Retry Failed:</b> Retry failed operations without deleting pending sales, orders or payments.
           </p>
 
           <div className="flex gap-2 flex-wrap">
@@ -307,13 +291,13 @@ export default function SyncSettings() {
             </button>
 
             <button
-              onClick={handleForceResync}
+              onClick={handleRetryFailed}
               disabled={syncing}
               className="btn-outline"
               style={{ borderColor: "#E67E22", color: "#E67E22" }}
             >
               <RefreshCw size={14} />
-              Force Full Resync
+              Retry Failed Sync
             </button>
           </div>
 
