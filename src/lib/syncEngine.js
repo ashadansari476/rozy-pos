@@ -408,28 +408,9 @@ export async function pullTable(tableName, sinceTs) {
   let pulled = 0;
   let updated = 0;
 
-  // Category names are unique only within a bakery, never globally.
-  if (tableName === "categories") {
-    const pending = await db.syncQueue.filter((op) =>
-      op.table === "categories" && (op.status === "pending" || op.status === "failed")
-    ).count();
-    if (pending) return { pulled: 0, updated: 0 };
-    const localCategories = await db.categories.toArray();
-    const keys = new Set(localCategories.map((c) =>
-      JSON.stringify([c.shopId || "rozy", String(c.name || "").toLowerCase().trim()])
-    ));
-    for (const r of remote) {
-      const shopId = r.shop_id || "rozy";
-      const name = String(r.name || "").trim();
-      const key = JSON.stringify([shopId, name.toLowerCase()]);
-      if (!name || keys.has(key)) continue;
-      await db.categories.add({ shopId, name, icon: r.icon || "📦", sortOrder: r.sort_order || 0 });
-      keys.add(key);
-      pulled++;
-    }
-    return { pulled, updated };
-  }
-
+  // Categories follow the same identity and conflict rules as other tables.
+  // Name-based merging previously lost cloud edits and could collide between
+  // devices. Local unsynced operations are protected by dirtyIds below.
   // Do not overwrite records that have local unacknowledged changes.
   const queued = await db.syncQueue.toArray();
   const dirtyIds = new Set(queued.filter((op) =>
