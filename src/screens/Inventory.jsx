@@ -369,13 +369,16 @@ function WastageTab({ shopId }) {
   const [range, setRange] = useState("month");
 
   useEffect(() => {
+    let cancelled = false;
+    setWastage([]);
     (async () => {
       const { getWastage } = await import("../lib/inventory");
       const now = new Date();
       const start = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
       const data = await getWastage({ from: start, shopId });
-      setWastage(data.sort((a, b) => b.ts - a.ts));
-    })();
+      if (!cancelled) setWastage(data.sort((a, b) => b.ts - a.ts));
+    })().catch(console.error);
+    return () => { cancelled = true; };
   }, [range, shopId]);
 
   const total = wastage.reduce((s, w) => s + (w.costValue || 0), 0);
