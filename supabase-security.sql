@@ -1,3 +1,13 @@
+-- DEPRECATED / UNSAFE: This legacy script grants every authenticated sync user
+-- unrestricted access to both bakeries and all financial records.
+-- It is deliberately blocked. Use the audited, per-shop staging migration
+-- in sql/20261024_shop_rls_staging.sql after reviewing live policies,
+-- backing up data, and provisioning individual Supabase Auth accounts.
+DO $$
+BEGIN
+  RAISE EXCEPTION 'Unsafe legacy Supabase security script is disabled. Do not run in production; review sql/20261024_shop_rls_staging.sql';
+END $$;
+
 -- ============================================================
 -- Rozy POS: lock the cloud database so only the signed-in sync account can use it.
 --
