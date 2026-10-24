@@ -476,6 +476,23 @@ export async function pullTable(tableName, sinceTs) {
     }
   }
 
+  // Purchases contain line items locally, but the current cloud purchases
+  // table does not have an items JSON column. Rebuild a newly downloaded
+  // purchase from its separately synchronized purchase_items rows.
+  if (tableName === "purchaseItems") {
+    const purchases = await db.purchases.where("shopId").equals(shop).toArray();
+    for (const purchase of purchases) {
+      if (Array.isArray(purchase.items) && purchase.items.length) continue;
+      const items = await db.purchaseItems.where("purchaseId").equals(purchase.id).toArray();
+      if (items.length) {
+        await db.purchases.update(purchase.id, {
+          items: items.map(({ productId, productName, qty, unit, cost, lineTotal }) =>
+            ({ productId, productName, qty, unit, cost, lineTotal })),
+        });
+      }
+    }
+  }
+
   return { pulled, updated };
 }
 
