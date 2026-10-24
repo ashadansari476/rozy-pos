@@ -1,6 +1,7 @@
 import { db, getDeviceTag } from "./db";
 import { isSyncConfigured, processQueue, queueOperation } from "./syncEngine";
 import { netCash } from "./money";
+import { validateSaleItems, remainingStockAfterSale } from "./saleRules";
 
 // Helper — get current shop ID
 function getCurrentShopId() {
@@ -28,6 +29,7 @@ export async function saveSale({
   if (!Number.isFinite(total) || total < 0) {
     throw new Error("Invalid bill total");
   }
+  validateSaleItems(items);
 
   const shop = shopId || getCurrentShopId();
   const ts = Date.now();
@@ -76,7 +78,7 @@ export async function saveSale({
           .first();
         if (!existing) continue;
 
-        const newStock = Math.max(0, (existing.stock || 0) - it.qty);
+        const newStock = remainingStockAfterSale(existing.stock ?? 0, it.qty);
         await db.shopStock.update(existing.id, { stock: newStock, updatedAt: ts });
 
         if (shouldSync) await queueOperation("shopStock", existing.id, "upsert", await db.shopStock.get(existing.id));
