@@ -15,7 +15,14 @@ export function validatePurchaseItems(items) {
     if (!Number.isFinite(item.cost) || item.cost < 0) {
       throw new Error("Purchase costs must be valid non-negative numbers");
     }
-    totalPaise += Math.round(item.qty * item.cost * 100);
+    const linePaise = Math.round(item.qty * item.cost * 100);
+    if (!Number.isSafeInteger(linePaise) || linePaise < 0) {
+      throw new Error("Purchase line amount exceeds safe currency limits");
+    }
+    totalPaise += linePaise;
+    if (!Number.isSafeInteger(totalPaise)) {
+      throw new Error("Purchase total exceeds safe currency limits");
+    }
   }
 
   return totalPaise / 100;
