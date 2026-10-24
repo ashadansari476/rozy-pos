@@ -292,7 +292,15 @@ async function sbFetch(path, options = {}) {
         const text = await res.text();
         throw new Error(`Sync error ${res.status}: ${text}`);
       }
-      return res.json().catch(() => null);
+      // Empty DELETE responses are valid. A malformed JSON body is not.
+      if (res.status === 204) return null;
+      const body = await res.text();
+      if (!body.trim()) return null;
+      try {
+        return JSON.parse(body);
+      } catch {
+        throw new Error("Invalid JSON returned by cloud sync API");
+      }
     } catch (err) {
       lastError = err;
       const isNetworkError =
@@ -543,34 +551,47 @@ export async function queueOperation(tableName, recordId, action, data) {
   });
 }
 
+let queueProcessing = null;
+
 export async function processQueue() {
   if (!isOnline()) return { processed: 0, failed: 0 };
+  // Single-flight queue drain: overlapping auto-sync, user sync and pushRecord
+  // calls must not send the same payment/sale operation concurrently.
+  if (queueProcessing) return queueProcessing;
 
-  // Fetch all queue states so an older failed/deferred write can block newer
-  // operations for the same record. Otherwise a stale upsert can resurrect a delete.
-  const pending = selectReadyQueueOperations(await db.syncQueue.toArray());
-
-  let processed = 0;
-  let failed = 0;
-
-  for (const op of pending) {
-    try {
-      if (op.action === "delete") {
-        await deleteRemote(op.table, op.recordId);
-      } else {
-        await pushTable(op.table, [op.data]);
+  queueProcessing = (async () => {
+    let processed = 0;
+    let failed = 0;
+    // Re-evaluate ordering after each acknowledgement. This lets consecutive
+    // updates for the same record drain safely in one invocation.
+    const attempted = new Set();
+    while (isOnline()) {
+      const operations = await db.syncQueue.toArray();
+      const ready = selectReadyQueueOperations(operations)
+        .filter((op) => !attempted.has(op.id));
+      if (!ready.length) break;
+      const op = ready[0];
+      attempted.add(op.id);
+      try {
+        if (op.action === "delete") {
+          await deleteRemote(op.table, op.recordId);
+        } else {
+          await pushTable(op.table, [op.data]);
+        }
+        await db.syncQueue.delete(op.id);
+        processed++;
+      } catch (e) {
+        await db.syncQueue.update(op.id, nextQueueFailure(op, e));
+        failed++;
       }
-      await db.syncQueue.delete(op.id);
-      processed++;
-    } catch (e) {
-      await db.syncQueue.update(op.id, nextQueueFailure(op, e));
-      failed++;
     }
+    return { processed, failed };
+  })();
+  try {
+    return await queueProcessing;
+  } finally {
+    queueProcessing = null;
   }
-
-  // Never delete unacknowledged operations solely due to age.
-
-  return { processed, failed };
 }
 
 export async function retryFailedSyncOperation(id) {
