@@ -1,6 +1,8 @@
 import { db, getDeviceTag } from "./db";
 import { pushRecord, isSyncConfigured, queueOperation, processQueue } from "./syncEngine";
 import { validateNewOrder } from "./orderRules";
+import { validateDeliverySettlement, validateDeliveryStock } from "./orderDeliveryRules";
+import { nextBillNumber } from "./billing";
 
 // Helper — get current shop ID
 function getCurrentShopId() {
@@ -401,149 +403,202 @@ export async function completeOrder({
   counter = "Rozy",
   user,
 }) {
-  const order = await db.orders.get(orderId);
-  if (!order) throw new Error("Order not found");
-  if (order.status === "delivered") throw new Error("Order already delivered");
-  if (order.shopId !== getCurrentShopId()) throw new Error("Order does not belong to the selected bakery");
+  const shopId = getCurrentShopId();
+  const counterShop = String(counter).toLowerCase();
+  if (counterShop !== shopId) {
+    throw new Error("Cannot deliver an order for a different bakery");
+  }
 
-  const now = Date.now();
-  const shopId = counter.toLowerCase();
-  if (shopId !== order.shopId) throw new Error("Cannot deliver an order for a different bakery");
+  // A delivered order must be atomic: bill, items, stock, movements, payment,
+  // customer totals, order status, audit and all cloud queue intents.
+  let result;
+  const shouldSync = isSyncConfigured();
+  await db.transaction("rw", [
+    db.settings, db.orders, db.products, db.shopStock,
+    db.sales, db.saleItems, db.stockMovements, db.payments,
+    db.customers, db.auditLog, db.syncQueue,
+  ], async () => {
+    const order = await db.orders.get(orderId);
+    if (!order || order.shopId !== shopId) {
+      throw new Error("Order does not belong to the selected bakery");
+    }
+    const { balance, change, paidPreviously } =
+      validateDeliverySettlement(order, paymentAmount, paymentMode);
 
-  const prefix = counter === "Rozy" ? "RZ" : counter === "Warish" ? "WR" : "GN";
-  const seqKey = `billSeq_${counter}`;
-  const rec = await db.settings.get(seqKey);
-  const next = (rec?.value || 0) + 1;
-  await db.settings.put({ key: seqKey, value: next });
-  const billNo = `${prefix}-${String(next).padStart(4, "0")}`;
+    // Verify all items' owners and stock before writing any part of the sale.
+    // Each unique product is checked once, even if the order has multiple lines.
+    const stockByProduct = new Map();
+    for (const item of order.items) {
+      const product = await db.products.get(item.productId);
+      if (!product || product.shopId !== shopId) {
+        throw new Error("Order contains a product from another bakery");
+      }
+      if (!stockByProduct.has(item.productId)) {
+        const row = await db.shopStock
+          .where("[shopId+productId]").equals([shopId, item.productId])
+          .first();
+        stockByProduct.set(item.productId, row);
+      }
+    }
+    const remainingStock = validateDeliveryStock(order.items, stockByProduct);
 
-  const totalPaid = (order.advanceAmount || 0) + (paymentAmount || 0);
-  const change = Math.max(0, totalPaid - order.totalAmount);
-
-  const saleId = await db.sales.add({
-    shopId,
-    billNo,
-    counter,
-    cashier: user || "system",
-    ts: now,
-    subtotal: order.totalAmount,
-    discount: 0,
-    total: order.totalAmount,
-    payment: {
+    const now = Date.now();
+    // Reuse the checkout's shop/device-aware bill sequence.
+    const billNo = await nextBillNumber(shopId);
+    const totalPaid = paidPreviously + balance;
+    const payment = {
       mode: paymentMode,
-      cash: paymentMode === "Cash" ? totalPaid : 0,
-      upi: paymentMode === "UPI" ? totalPaid : 0,
-      card: paymentMode === "Card" ? totalPaid : 0,
+      // Record only money taken at delivery, not advances already recorded
+      // separately in the payments table.
+      cash: paymentMode === "Cash" ? paymentAmount : 0,
+      upi: paymentMode === "UPI" ? balance : 0,
+      card: paymentMode === "Card" ? balance : 0,
       paid: totalPaid,
+      advance: paidPreviously,
       change,
-    },
-    customerId: order.customerId,
-    customerName: order.customerName,
-    customerPhone: order.customerPhone,
-    fromOrderId: orderId,
-    channel: order.channel || "pos",
-    source: order.source || "pos",
-    note: `From order ${order.orderNo}`,
-    updatedAt: now,
-  });
+    };
+    const saleRecord = {
+      shopId,
+      billNo,
+      counter: shopId,
+      cashier: user || "system",
+      ts: now,
+      subtotal: order.totalAmount,
+      discount: 0,
+      total: order.totalAmount,
+      payment,
+      customerId: order.customerId,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      fromOrderId: orderId,
+      channel: order.channel || "pos",
+      source: order.source || "pos",
+      note: `From order ${order.orderNo}`,
+      updatedAt: now,
+    };
+    const saleId = await db.sales.add(saleRecord);
+    if (shouldSync) await queueOperation("sales", saleId, "upsert", { id: saleId, ...saleRecord });
 
-  const createdItems = [];
-  const changedStocks = [];
-  const createdMovements = [];
-  for (const it of order.items) {
-    const saleItemId = await db.saleItems.add({
-      saleId,
-      productId: it.productId,
-      name: it.productName,
-      qty: it.qty,
-      unit: it.unit,
-      price: it.price,
-      lineTotal: it.lineTotal,
-    });
-    createdItems.push(saleItemId);
+    for (const item of order.items) {
+      const saleItem = {
+        saleId,
+        productId: item.productId,
+        name: item.productName,
+        qty: item.qty,
+        unit: item.unit,
+        price: item.price,
+        lineTotal: item.lineTotal,
+      };
+      const saleItemId = await db.saleItems.add(saleItem);
+      if (shouldSync) {
+        await queueOperation("saleItems", saleItemId, "upsert",
+          { id: saleItemId, ...saleItem });
+      }
+    }
 
-    // Deduct from shopStock
-    const existing = await db.shopStock
-      .where("[shopId+productId]")
-      .equals([shopId, it.productId])
-      .first();
-
-    if (existing) {
-      const newStock = Math.max(0, (existing.stock || 0) - it.qty);
-      await db.shopStock.update(existing.id, { stock: newStock });
-      changedStocks.push(existing.id);
-
-      const movementId = await db.stockMovements.add({
+    // Persist one final shop-specific balance and movement per product.
+    for (const [productId, newStock] of remainingStock) {
+      const previous = stockByProduct.get(productId);
+      await db.shopStock.update(previous.id, { stock: newStock, updatedAt: now });
+      if (shouldSync) {
+        await queueOperation("shopStock", previous.id, "upsert",
+          await db.shopStock.get(previous.id));
+      }
+      const product = await db.products.get(productId);
+      const deliveredQty = order.items
+        .filter((i) => i.productId === productId)
+        .reduce((sum, i) => sum + i.qty, 0);
+      const movement = {
         shopId,
         ts: now,
-        productId: it.productId,
-        productName: it.productName,
-        qty: -it.qty,
-        unit: it.unit,
+        productId,
+        productName: product.name,
+        qty: -deliveredQty,
+        unit: product.unit,
         reason: "sale",
         note: `Order ${order.orderNo} delivered`,
-        cost: it.cost || 0,
+        cost: product.cost || 0,
         userName: user || "system",
         balanceAfter: newStock,
-      });
-      createdMovements.push(movementId);
+      };
+      const movementId = await db.stockMovements.add(movement);
+      if (shouldSync) {
+        await queueOperation("stockMovements", movementId, "upsert",
+          { id: movementId, ...movement });
+      }
     }
-  }
 
-  let balancePaymentId;
-  if (paymentAmount > 0) {
-    balancePaymentId = await db.payments.add({
-      shopId,
-      orderId,
-      ts: now,
-      type: "balance",
-      amount: paymentAmount,
-      note: `Paid at delivery · ${paymentMode}`,
-    });
-  }
+    if (balance > 0) {
+      const paymentRecord = {
+        shopId,
+        orderId,
+        ts: now,
+        type: "balance",
+        // The tender may exceed the amount due; only the actual debt is earned.
+        amount: balance,
+        note: `Paid at delivery · ${paymentMode}`,
+      };
+      const paymentId = await db.payments.add(paymentRecord);
+      if (shouldSync) {
+        await queueOperation("payments", paymentId, "upsert",
+          { id: paymentId, ...paymentRecord });
+      }
+    }
 
-  await db.orders.update(orderId, {
-    status: "delivered",
-    deliveredAt: now,
-    deliveredBy: user || "system",
-    billNo,
-    saleId,
-    balanceAmount: 0,
-    updatedAt: now,
-  });
+    const updatedOrder = {
+      ...order,
+      status: "delivered",
+      deliveredAt: now,
+      deliveredBy: user || "system",
+      billNo,
+      saleId,
+      balanceAmount: 0,
+      updatedAt: now,
+    };
+    await db.orders.put(updatedOrder);
+    if (shouldSync) {
+      await queueOperation("orders", orderId, "upsert", updatedOrder);
+    }
 
-  if (order.customerId) {
-    const cust = await db.customers.get(order.customerId);
-    if (cust) {
-      await db.customers.update(order.customerId, {
-        totalSpent: (cust.totalSpent || 0) + order.totalAmount,
-        totalOrders: (cust.totalOrders || 0) + 1,
+    if (order.customerId != null) {
+      const customer = await db.customers.get(order.customerId);
+      if (!customer || customer.shopId !== shopId) {
+        throw new Error("Linked order customer is missing or belongs to another bakery");
+      }
+      const updatedCustomer = {
+        ...customer,
+        totalSpent: (customer.totalSpent || 0) + order.totalAmount,
+        totalOrders: (customer.totalOrders || 0) + 1,
         lastVisit: now,
         updatedAt: now,
-      });
+      };
+      await db.customers.put(updatedCustomer);
+      if (shouldSync) {
+        await queueOperation("customers", customer.id, "upsert", updatedCustomer);
+      }
     }
-  }
 
-  const completedAuditId = await db.auditLog.add({
-    shopId,
-    ts: now,
-    userName: user || "system",
-    action: "ORDER_COMPLETED",
-    entity: "order",
-    entityId: orderId,
-    details: { orderNo: order.orderNo, billNo, totalPaid, paymentMode },
+    const audit = {
+      shopId,
+      ts: now,
+      userName: user || "system",
+      action: "ORDER_COMPLETED",
+      entity: "order",
+      entityId: orderId,
+      details: { orderNo: order.orderNo, billNo, totalPaid, paymentMode },
+    };
+    const auditId = await db.auditLog.add(audit);
+    if (shouldSync) {
+      await queueOperation("auditLog", auditId, "upsert",
+        { id: auditId, ...audit });
+    }
+    result = { billNo, saleId, change };
   });
 
-  await queueSavedChanges([
-    { table: "orders", id: orderId },
-    { table: "sales", id: saleId },
-    ...createdItems.map((id) => ({ table: "saleItems", id })),
-    ...changedStocks.map((id) => ({ table: "shopStock", id })),
-    ...createdMovements.map((id) => ({ table: "stockMovements", id })),
-    { table: "payments", id: balancePaymentId },
-    { table: "customers", id: order.customerId },
-    { table: "auditLog", id: completedAuditId },
-  ]);
-
-  return { billNo, saleId, change };
+  // Only attempt cloud I/O AFTER the entire order delivery commits.
+  if (shouldSync && typeof navigator !== "undefined" && navigator.onLine) {
+    processQueue().catch((error) =>
+      console.error("Order delivery sync remains queued", error));
+  }
+  return result;
 }
