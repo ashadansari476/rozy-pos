@@ -41,3 +41,25 @@ test("only oldest pending operation for each record is sent per pass", () => {
   ];
   assert.deepEqual(selectReadyQueueOperations(ops, 1000).map((x) => x.id), [1]);
 });
+
+import { isTransientSyncError } from "./src/lib/syncQueueRules.js";
+
+test("network interruptions remain retryable after five attempts", () => {
+  const failure = nextQueueFailure({ retries: 10, status: "pending" }, new TypeError("Failed to fetch"), 1000);
+  assert.equal(failure.status, "pending");
+  assert.equal(failure.nextRetryAt, 3601000);
+  assert.equal(isTransientSyncError(new TypeError("fetch failed")), true);
+});
+
+test("permanent permission errors still stop after retry limit", () => {
+  const failure = nextQueueFailure({ retries: 4 }, new Error("Sync error 403: forbidden"), 1000);
+  assert.equal(failure.status, "failed");
+  assert.equal(isTransientSyncError(new Error("Sync error 403: forbidden")), false);
+});
+
+test("retry queue preserves ordering after transient network failure", () => {
+  const first = { id: 1, table: "payments", recordId: 5, status: "pending", nextRetryAt: 2000 };
+  const second = { id: 2, table: "payments", recordId: 5, status: "pending" };
+  assert.deepEqual(selectReadyQueueOperations([first, second], 1000), []);
+  assert.deepEqual(selectReadyQueueOperations([first, second], 2000).map((op) => op.id), [1]);
+});
