@@ -56,19 +56,19 @@ export async function deleteCustomer(id) {
 }
 
 export async function getAllCustomers() {
-  const list = await db.customers.toArray();
+  const list = await db.customers.where("shopId").equals(getCurrentShopId()).toArray();
   return list.sort((a, b) => (b.lastVisit || 0) - (a.lastVisit || 0));
 }
 
 export async function findCustomerByPhone(phone) {
   if (!phone) return null;
   const clean = phone.replace(/\D/g, "");
-  const all = await db.customers.toArray();
+  const all = await db.customers.where("shopId").equals(getCurrentShopId()).toArray();
   return all.find((c) => c.phone.replace(/\D/g, "").endsWith(clean)) || null;
 }
 
 export async function searchCustomers(query) {
-  const all = await db.customers.toArray();
+  const all = await db.customers.where("shopId").equals(getCurrentShopId()).toArray();
   if (!query) return all;
   const q = query.toLowerCase().trim();
   return all.filter(
@@ -81,9 +81,11 @@ export async function searchCustomers(query) {
 // ============ CUSTOMER STATS ============
 
 export async function getCustomerStats(customerId) {
-  const sales = await db.sales.toArray();
+  const customer = await db.customers.get(customerId);
+  if (!customer || customer.shopId !== getCurrentShopId()) throw new Error("Customer belongs to another bakery");
+  const sales = await db.sales.where("shopId").equals(getCurrentShopId()).toArray();
   const customerSales = sales.filter((s) => s.customerId === customerId);
-  const orders = await db.orders.toArray();
+  const orders = await db.orders.where("shopId").equals(getCurrentShopId()).toArray();
   const customerOrders = orders.filter((o) => o.customerId === customerId);
 
   const totalSpent = customerSales.reduce((sum, s) => sum + (s.total || 0), 0);
@@ -115,7 +117,9 @@ export async function getCustomerStats(customerId) {
 }
 
 export async function getCustomerHistory(customerId) {
-  const sales = await db.sales.toArray();
+  const customer = await db.customers.get(customerId);
+  if (!customer || customer.shopId !== getCurrentShopId()) throw new Error("Customer belongs to another bakery");
+  const sales = await db.sales.where("shopId").equals(getCurrentShopId()).toArray();
   const mySales = sales
     .filter((s) => s.customerId === customerId)
     .sort((a, b) => b.ts - a.ts);
@@ -271,7 +275,7 @@ export async function deleteOrder(orderId) {
 }
 
 export async function getAllOrders({ status, from, to } = {}) {
-  let all = await db.orders.toArray();
+  let all = await db.orders.where("shopId").equals(getCurrentShopId()).toArray();
   if (status && status !== "all") {
     all = all.filter((o) => o.status === status);
   }
@@ -281,14 +285,14 @@ export async function getAllOrders({ status, from, to } = {}) {
 }
 
 export async function getOrdersByCustomer(customerId) {
-  const all = await db.orders.toArray();
+  const all = await db.orders.where("shopId").equals(getCurrentShopId()).toArray();
   return all
     .filter((o) => o.customerId === customerId)
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export async function getOrderStats() {
-  const all = await db.orders.toArray();
+  const all = await db.orders.where("shopId").equals(getCurrentShopId()).toArray();
   const now = Date.now();
   const startOfDay = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
   const endOfDay = startOfDay + 24 * 60 * 60 * 1000;
