@@ -368,7 +368,7 @@ export async function pushTable(tableName, records) {
 
   // Fail closed: a malformed or cross-shop queued record must never reach Supabase.
   // Child tables are checked against their parent by the server RLS migration.
-  const shopScoped = !["saleItems", "orderItems", "purchaseItems"].includes(tableName);
+  const shopScoped = !CHILD_PARENT[tableName];
   const activeShop = localStorage.getItem("rozy-pos-current-shop");
   if (shopScoped) {
     if (activeShop !== "rozy" && activeShop !== "warish") {
@@ -580,7 +580,20 @@ export async function processQueue() {
     while (isOnline()) {
       const operations = await db.syncQueue.toArray();
       const ready = selectReadyQueueOperations(operations)
-        .filter((op) => !attempted.has(op.id));
+        .filter((op) => !attempted.has(op.id))
+        // A child may not be uploaded until any queued parent upsert is acknowledged.
+        .filter((op) => {
+          const parent = CHILD_PARENT[op.table];
+          if (!parent || op.action !== "upsert") return true;
+          const field = parent.column.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+          return !operations.some((candidate) =>
+            candidate.table === parent.table &&
+            candidate.action === "upsert" &&
+            String(candidate.recordId) === String(op.data?.[field])
+          );
+        })
+        // Parents first, even if a child was queued slightly earlier.
+        .sort((a, b) => Number(!!CHILD_PARENT[a.table]) - Number(!!CHILD_PARENT[b.table]));
       if (!ready.length) break;
       const op = ready[0];
       attempted.add(op.id);
