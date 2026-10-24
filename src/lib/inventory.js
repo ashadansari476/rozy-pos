@@ -1,9 +1,25 @@
 import { validatePurchaseItems } from "./inventoryRules";
 import { db } from "./db";
+import Dexie from "dexie";
+import { isSyncConfigured, processQueue, queueOperation } from "./syncEngine";
+
+async function queueInventoryRow(table, id) {
+  if (!isSyncConfigured() || id == null) return;
+  const record = await db.table(table).get(id);
+  if (record) await queueOperation(table, id, "upsert", record);
+}
+
+function flushInventoryQueue() {
+  if (isSyncConfigured() && typeof navigator !== "undefined" && navigator.onLine) {
+    processQueue().catch((error) => console.error("Inventory cloud changes remain queued", error));
+  }
+}
 
 // Helper — get current shop ID
 function getCurrentShopId() {
-  return localStorage.getItem("rozy-pos-current-shop") || "rozy";
+  const shop = localStorage.getItem("rozy-pos-current-shop");
+  if (shop !== "rozy" && shop !== "warish") throw new Error("Select a valid bakery");
+  return shop;
 }
 
 // ============ STOCK ADJUSTMENTS ============
@@ -20,12 +36,14 @@ export async function adjustStock({ productId, qty, reason, note, cost, user }) 
   if (!product) throw new Error("Product not found");
 
   const shopId = getCurrentShopId();
+  if (product.shopId !== shopId) throw new Error("Cannot change stock for a product from another bakery");
+  const insideParentTransaction = Boolean(Dexie.currentTransaction);
   const ts = Date.now();
   let newStock = 0;
 
   // Stock belongs to a shop, not to the shared product catalogue. Keep the stock
   // update and its movement/audit records atomic so reports cannot show half a change.
-  await db.transaction("rw", [db.shopStock, db.stockMovements, db.auditLog], async () => {
+  await db.transaction("rw", [db.shopStock, db.stockMovements, db.auditLog, db.syncQueue], async () => {
     let stockRecord = await db.shopStock
       .where("[shopId+productId]")
       .equals([shopId, productId])
@@ -48,8 +66,9 @@ export async function adjustStock({ productId, qty, reason, note, cost, user }) 
     }
 
     await db.shopStock.update(stockRecord.id, { stock: newStock, updatedAt: ts });
+    await queueInventoryRow("shopStock", stockRecord.id);
 
-    await db.stockMovements.add({
+    const movementId = await db.stockMovements.add({
       shopId,
       ts,
       productId,
@@ -62,8 +81,9 @@ export async function adjustStock({ productId, qty, reason, note, cost, user }) 
       userName: user || "system",
       balanceAfter: newStock,
     });
+    await queueInventoryRow("stockMovements", movementId);
 
-    await db.auditLog.add({
+    const auditId = await db.auditLog.add({
       shopId,
       ts,
       userName: user || "system",
@@ -72,8 +92,10 @@ export async function adjustStock({ productId, qty, reason, note, cost, user }) 
       entityId: productId,
       details: { qty, reason, note, newStock },
     });
+    await queueInventoryRow("auditLog", auditId);
   });
 
+  if (!insideParentTransaction) flushInventoryQueue();
   return newStock;
 }
 // ============ WASTAGE ============
@@ -100,7 +122,7 @@ export async function recordWastage({ productId, qty, reason, note, user }) {
   // Otherwise an error could deduct stock without leaving the matching wastage record.
   await db.transaction(
     "rw",
-    [db.products, db.shopStock, db.stockMovements, db.auditLog, db.wastage],
+    [db.products, db.shopStock, db.stockMovements, db.auditLog, db.wastage, db.syncQueue],
     async () => {
       await adjustStock({
         productId,
@@ -110,7 +132,7 @@ export async function recordWastage({ productId, qty, reason, note, user }) {
         user,
       });
 
-      await db.wastage.add({
+      const wastageId = await db.wastage.add({
         shopId,
         ts: Date.now(),
         productId,
@@ -122,9 +144,11 @@ export async function recordWastage({ productId, qty, reason, note, user }) {
         costValue: wastageValue,
         userName: user || "system",
       });
+      await queueInventoryRow("wastage", wastageId);
     }
   );
 
+  flushInventoryQueue();
   return wastageValue;
 }
 
@@ -158,7 +182,7 @@ export async function addBatch({ productId, qty, expiryDate, cost, batchNo, user
   // Do not leave a batch record behind if its corresponding stock adjustment fails.
   await db.transaction(
     "rw",
-    [db.products, db.batches, db.shopStock, db.stockMovements, db.auditLog],
+    [db.products, db.batches, db.shopStock, db.stockMovements, db.auditLog, db.syncQueue],
     async () => {
       batchId = await db.batches.add({
         shopId,
@@ -172,6 +196,7 @@ export async function addBatch({ productId, qty, expiryDate, cost, batchNo, user
         ts: Date.now(),
         active: true,
       });
+      await queueInventoryRow("batches", batchId);
 
       await adjustStock({
         productId,
@@ -184,6 +209,7 @@ export async function addBatch({ productId, qty, expiryDate, cost, batchNo, user
     }
   );
 
+  flushInventoryQueue();
   return batchId;
 }
 
@@ -205,7 +231,7 @@ export async function getExpiredBatches() {
 export async function markBatchExpired(batchId, user) {
   await db.transaction(
     "rw",
-    [db.products, db.batches, db.shopStock, db.stockMovements, db.auditLog, db.wastage],
+    [db.products, db.batches, db.shopStock, db.stockMovements, db.auditLog, db.wastage, db.syncQueue],
     async () => {
       const batch = await db.batches.get(batchId);
       if (!batch || !batch.active || batch.qty <= 0) return;
@@ -222,8 +248,10 @@ export async function markBatchExpired(batchId, user) {
       });
 
       await db.batches.update(batchId, { active: false, qty: 0 });
+      await queueInventoryRow("batches", batchId);
     }
   );
+  flushInventoryQueue();
 }
 
 // ============ SUPPLIERS ============
