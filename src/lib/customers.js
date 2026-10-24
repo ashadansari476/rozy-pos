@@ -22,8 +22,9 @@ async function queueSavedChanges(changes) {
 // ============ CUSTOMERS ============
 
 export async function addCustomer({ name, phone, address, notes, birthday }) {
+  if (!name?.trim()) throw new Error("Customer name is required");
   const now = Date.now();
-  const id = await db.customers.add({
+  const record = {
     shopId: getCurrentShopId(),
     name: name.trim(),
     phone: (phone || "").trim(),
@@ -35,25 +36,50 @@ export async function addCustomer({ name, phone, address, notes, birthday }) {
     totalSpent: 0,
     totalOrders: 0,
     lastVisit: now,
+  };
+  const id = await db.transaction("rw", [db.customers, db.syncQueue], async () => {
+    const createdId = await db.customers.add(record);
+    if (isSyncConfigured()) {
+      await queueOperation("customers", createdId, "upsert", { ...record, id: createdId });
+    }
+    return createdId;
   });
-
-  pushRecord("customers", await db.customers.get(id)).catch(() => {});
-
+  if (isSyncConfigured() && navigator.onLine) {
+    processQueue().catch((error) => console.error("Customer cloud sync remains queued", error));
+  }
   return id;
 }
 
 export async function updateCustomer(id, data) {
-  const now = Date.now();
-  const existing = await db.customers.get(id);
-  if (!existing || existing.shopId !== getCurrentShopId()) throw new Error("Customer does not belong to the selected bakery");
-  const { shopId: _ignored, id: _ignoredId, ...safeData } = data;
-  const result = await db.customers.update(id, { ...safeData, updatedAt: now });
-  pushRecord("customers", await db.customers.get(id)).catch(() => {});
+  const result = await db.transaction("rw", [db.customers, db.syncQueue], async () => {
+    const existing = await db.customers.get(id);
+    if (!existing || existing.shopId !== getCurrentShopId()) {
+      throw new Error("Customer does not belong to the selected bakery");
+    }
+    const { shopId: ignoredShop, id: ignoredId, ...safeData } = data || {};
+    const updated = { ...existing, ...safeData, updatedAt: Date.now() };
+    await db.customers.put(updated);
+    if (isSyncConfigured()) await queueOperation("customers", id, "upsert", updated);
+    return id;
+  });
+  if (isSyncConfigured() && navigator.onLine) {
+    processQueue().catch((error) => console.error("Customer cloud sync remains queued", error));
+  }
   return result;
 }
 
 export async function deleteCustomer(id) {
-  return await db.customers.delete(id);
+  await db.transaction("rw", [db.customers, db.syncQueue], async () => {
+    const existing = await db.customers.get(id);
+    if (!existing || existing.shopId !== getCurrentShopId()) {
+      throw new Error("Customer does not belong to the selected bakery");
+    }
+    if (isSyncConfigured()) await queueOperation("customers", id, "delete");
+    await db.customers.delete(id);
+  });
+  if (isSyncConfigured() && navigator.onLine) {
+    processQueue().catch((error) => console.error("Customer deletion remains queued", error));
+  }
 }
 
 export async function getAllCustomers() {
@@ -72,10 +98,8 @@ export async function searchCustomers(query) {
   const all = await db.customers.where("shopId").equals(getCurrentShopId()).toArray();
   if (!query) return all;
   const q = query.toLowerCase().trim();
-  return all.filter(
-    (c) =>
-      c.name.toLowerCase().includes(q) ||
-      (c.phone || "").includes(q)
+  return all.filter((c) =>
+    c.name.toLowerCase().includes(q) || (c.phone || "").includes(q)
   );
 }
 
