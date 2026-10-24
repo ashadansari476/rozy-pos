@@ -38,14 +38,16 @@ BEGIN
  FOREACH t IN ARRAY ARRAY[
  'products','categories','sales','customers','orders','expenses','targets',
  'cash_drawer','audit_log','stock_movements','wastage','suppliers','purchases',
- 'shop_stock','pos_users','batches','payments'
+ 'shop_stock','pos_users','batches','payments','users'
  ] LOOP
   IF to_regclass('public.' || t) IS NULL THEN RAISE EXCEPTION 'Missing table: %',t; END IF;
   EXECUTE format('ALTER TABLE public.%I ADD COLUMN IF NOT EXISTS shop_id text',t);
-  -- Legacy categories/products are owned by Rozy, not implicitly shared.
-  EXECUTE format('UPDATE public.%I SET shop_id = %L WHERE shop_id IS NULL',t,'rozy');
+  -- Never guess the bakery for an untagged record.
+  -- NOT NULL fails atomically if any untagged record remains.
   EXECUTE format('ALTER TABLE public.%I ALTER COLUMN shop_id SET NOT NULL',t);
   EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY',t);
+  EXECUTE format('REVOKE ALL ON public.%I FROM anon',t);
+  EXECUTE format('DROP POLICY IF EXISTS "public all" ON public.%I',t);
   EXECUTE format('DROP POLICY IF EXISTS rozy_authenticated_all ON public.%I',t);
   EXECUTE format('DROP POLICY IF EXISTS pos_shop_read ON public.%I',t);
   EXECUTE format('DROP POLICY IF EXISTS pos_shop_insert ON public.%I',t);
@@ -96,7 +98,14 @@ BEGIN
   EXECUTE format('CREATE POLICY pos_child_delete ON public.%I FOR DELETE TO authenticated USING (EXISTS (SELECT 1 FROM public.%I p WHERE p.id = %I AND public.pos_is_shop_owner(p.shop_id)))',t,parent,foreign_col);
  END LOOP;
 END $$;
--- Remove other legacy permissive policies separately after inspecting pg_policies.
--- PostgreSQL combines permissive policies with OR; leaving ANY old broad policy
--- active defeats isolation. Do not deploy before the audit confirms this.
+-- Verify the migration fails if any broad permissive policy remains.
+DO $
+DECLARE n integer;
+BEGIN
+ SELECT count(*) INTO n FROM pg_policies
+ WHERE schemaname='public' AND policyname='public all';
+ IF n > 0 THEN RAISE EXCEPTION 'Unsafe: % public all policies remain', n; END IF;
+END $;
+-- STILL STAGING ONLY: validate client roles, table schema, child insert order,
+-- and per-user Auth before execution. Shared owner sessions cannot restrict cashiers.
 COMMIT;
