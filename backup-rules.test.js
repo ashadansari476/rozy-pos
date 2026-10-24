@@ -42,3 +42,14 @@ test("invalid table entries are rejected", () => {
   const backup = { ...valid, data: { ...valid.data, sales: [null] } };
   assert.throws(() => validateBackupForRestore(backup, tables), /must contain an array of records/);
 });
+
+test("backup rejects missing envelope and malformed record arrays", () => {
+  assert.throws(() => validateBackupForRestore(null, tables), /Invalid backup file/);
+  assert.throws(() => validateBackupForRestore({ ...valid, data: [] }, tables), /Invalid backup file/);
+  assert.throws(() => validateBackupForRestore({ ...valid, data: { ...valid.data, sales: {} } }, tables), /must contain an array/);
+});
+
+test("backup rejects zero or non-integer version", () => {
+  assert.throws(() => validateBackupForRestore({ ...valid, version: 0 }, tables), /Unsupported backup version/);
+  assert.throws(() => validateBackupForRestore({ ...valid, version: 1.5 }, tables), /Unsupported backup version/);
+});
