@@ -1,4 +1,4 @@
-import { validatePurchaseItems } from "./inventoryRules";
+import { validatePurchaseItems, normalizePurchaseSupplierId } from "./inventoryRules";
 import { db } from "./db";
 import Dexie from "dexie";
 import { isSyncConfigured, processQueue, queueOperation } from "./syncEngine";
@@ -310,6 +310,7 @@ export async function getAllSuppliers(shopId = getCurrentShopId()) {
 export async function recordPurchase({ supplierId, supplierName, items, note, user }) {
   const shopId = getCurrentShopId();
   const total = validatePurchaseItems(items);
+  const verifiedSupplierId = normalizePurchaseSupplierId(supplierId);
 
   let purchaseId;
 
@@ -323,8 +324,8 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
       // A purchase must not link to a supplier belonging to another shop.
       // Verify inside the transaction so a missing or cross-shop supplier
       // cannot be committed into the purchase ledger.
-      if (supplierId !== undefined && supplierId !== null && supplierId !== "") {
-        const supplier = await db.suppliers.get(supplierId);
+      if (verifiedSupplierId !== null) {
+        const supplier = await db.suppliers.get(verifiedSupplierId);
         if (!supplier || supplier.shopId !== shopId) {
           throw new Error("Purchase supplier not found in the current shop");
         }
@@ -340,15 +341,15 @@ export async function recordPurchase({ supplierId, supplierName, items, note, us
 
       // Resolve the supplier name from the verified local record rather than
       // trusting a caller-supplied label that could misstate the purchase ledger.
-      const verifiedSupplier = supplierId !== undefined && supplierId !== null && supplierId !== ""
-        ? await db.suppliers.get(supplierId)
+      const verifiedSupplier = verifiedSupplierId !== null
+        ? await db.suppliers.get(verifiedSupplierId)
         : null;
       const recordedSupplierName = verifiedSupplier?.name || supplierName || "Unknown";
 
       purchaseId = await db.purchases.add({
         shopId,
         ts: Date.now(),
-        supplierId: supplierId ?? null,
+        supplierId: verifiedSupplierId,
         supplierName: recordedSupplierName,
         items: items.map((it) => ({
           productId: it.productId,
