@@ -1,5 +1,6 @@
 import { db, getDeviceTag } from "./db";
 import { pushRecord, isSyncConfigured, queueOperation, processQueue } from "./syncEngine";
+import { validateNewOrder } from "./orderRules";
 
 // Helper — get current shop ID
 function getCurrentShopId() {
@@ -143,71 +144,118 @@ export async function createOrder({
   channel,
   source,
 }) {
-  const now = Date.now();
-  const orderSeqRec = await db.settings.get("orderSeq");
-  const orderSeq = (orderSeqRec?.value || 0) + 1;
-  await db.settings.put({ key: "orderSeq", value: orderSeq });
-  const orderNo = `ORD-${getDeviceTag()}-${String(orderSeq).padStart(4, "0")}`;
+  // The order, every child item, the advance payment, and every durable sync
+  // intent must commit together. No visible order can have a missing payment
+  // queue record after a crash or an offline network transition.
+  const advance = validateNewOrder({ items, totalAmount, advanceAmount });
   const shopId = getCurrentShopId();
+  const now = Date.now();
+  const shouldSync = isSyncConfigured();
+  const requestedDelivery = deliveryDate ? new Date(deliveryDate).getTime() : now;
+  if (!Number.isFinite(requestedDelivery)) throw new Error("Invalid delivery date");
 
-  const orderId = await db.orders.add({
-    orderNo,
-    shopId,
-    customerId: customerId || null,
-    customerName: customerName || "Walk-in",
-    customerPhone: customerPhone || "",
-    items: items.map((it) => ({
-      productId: it.productId,
-      productName: it.productName,
-      qty: it.qty,
-      unit: it.unit,
-      price: it.price,
-      lineTotal: it.qty * it.price,
-    })),
-    totalAmount,
-    advanceAmount: advanceAmount || 0,
-    balanceAmount: totalAmount - (advanceAmount || 0),
-    deliveryDate: deliveryDate ? new Date(deliveryDate).getTime() : now,
-    notes: notes || "",
-    orderType: orderType || "pickup",
-    address: address || "",
-    status: "pending",
-    channel: channel || "pos",
-    source: source || "pos",
-    createdAt: now,
-    createdAtTs: now,
-    createdBy: user || "system",
-    updatedAt: now,
-  });
+  let orderId;
+  let orderNo;
+  await db.transaction("rw",
+    [db.settings, db.orders, db.orderItems, db.payments, db.auditLog,
+      db.customers, db.products, db.syncQueue],
+    async () => {
+      if (customerId != null && customerId !== "") {
+        const customer = await db.customers.get(customerId);
+        if (!customer || customer.shopId !== shopId) {
+          throw new Error("Order customer does not belong to the selected bakery");
+        }
+      }
+      for (const item of items) {
+        const product = await db.products.get(item.productId);
+        if (!product || product.shopId !== shopId) {
+          throw new Error("Order product does not belong to the selected bakery");
+        }
+      }
 
-  let advancePaymentId;
-  if (advanceAmount > 0) {
-    advancePaymentId = await db.payments.add({
-      shopId,
-      orderId,
-      ts: now,
-      type: "advance",
-      amount: advanceAmount,
-      note: "Advance at booking",
-    });
+      const sequence = await db.settings.get("orderSeq");
+      const next = (sequence?.value || 0) + 1;
+      await db.settings.put({ key: "orderSeq", value: next });
+      orderNo = `ORD-${getDeviceTag()}-${String(next).padStart(4, "0")}`;
+
+      const savedItems = items.map((it) => ({
+        productId: it.productId,
+        productName: it.productName,
+        qty: it.qty,
+        unit: it.unit,
+        price: it.price,
+        lineTotal: it.qty * it.price,
+      }));
+      const order = {
+        orderNo,
+        shopId,
+        customerId: customerId || null,
+        customerName: customerName || "Walk-in",
+        customerPhone: customerPhone || "",
+        items: savedItems,
+        totalAmount,
+        advanceAmount: advance,
+        balanceAmount: totalAmount - advance,
+        deliveryDate: requestedDelivery,
+        notes: notes || "",
+        orderType: orderType || "pickup",
+        address: address || "",
+        status: "pending",
+        channel: channel || "pos",
+        source: source || "pos",
+        createdAt: now,
+        createdAtTs: now,
+        createdBy: user || "system",
+        updatedAt: now,
+      };
+      orderId = await db.orders.add(order);
+      if (shouldSync) await queueOperation("orders", orderId, "upsert", { ...order, id: orderId });
+
+      for (const item of savedItems) {
+        const itemId = await db.orderItems.add({ orderId, ...item });
+        if (shouldSync) {
+          await queueOperation("orderItems", itemId, "upsert",
+            { id: itemId, orderId, ...item });
+        }
+      }
+
+      if (advance > 0) {
+        const payment = {
+          shopId,
+          orderId,
+          ts: now,
+          type: "advance",
+          amount: advance,
+          note: "Advance at booking",
+        };
+        const paymentId = await db.payments.add(payment);
+        if (shouldSync) {
+          await queueOperation("payments", paymentId, "upsert",
+            { ...payment, id: paymentId });
+        }
+      }
+
+      const audit = {
+        shopId,
+        ts: now,
+        userName: user || "system",
+        action: "ORDER_CREATED",
+        entity: "order",
+        entityId: orderId,
+        details: { orderNo, totalAmount, advanceAmount: advance },
+      };
+      const auditId = await db.auditLog.add(audit);
+      if (shouldSync) {
+        await queueOperation("auditLog", auditId, "upsert", { ...audit, id: auditId });
+      }
+    }
+  );
+
+  // Transmission starts only after the entire local transaction commits.
+  if (shouldSync && typeof navigator !== "undefined" && navigator.onLine) {
+    processQueue().catch((error) =>
+      console.error("Order sync remains queued", error));
   }
-
-  const createdAuditId = await db.auditLog.add({
-    shopId,
-    ts: now,
-    userName: user || "system",
-    action: "ORDER_CREATED",
-    entity: "order",
-    entityId: orderId,
-    details: { orderNo, totalAmount, advanceAmount },
-  });
-
-  await queueSavedChanges([{ table: "orders", id: orderId }, { table: "payments", id: advancePaymentId }, { table: "auditLog", id: createdAuditId }]);
-
-  import("../stores/syncStore").then(({ useSync }) => {
-    useSync.getState().sync();
-  }).catch(() => {});
-
   return { orderId, orderNo };
 }
 
