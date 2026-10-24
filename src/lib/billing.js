@@ -29,7 +29,6 @@ export async function saveSale({
     throw new Error("Invalid bill total");
   }
 
-  if (typeof navigator !== "undefined" && !navigator.onLine) throw new Error("Internet is required to complete payments");
   const shop = shopId || getCurrentShopId();
   const ts = Date.now();
   const shouldSync = isSyncConfigured();
@@ -114,9 +113,12 @@ export async function saveSale({
   // Queue intents committed atomically with sale; network starts after commit.
   if (shouldSync) processQueue().catch((error) => console.error("Sale cloud sync remains queued", error));
 
-  import("../stores/syncStore")
-    .then(({ useSync }) => useSync.getState().sync())
-    .catch(() => {});
+  // Offline checkouts remain local and queued; connectivity restoration triggers sync.
+  if (typeof navigator !== "undefined" && navigator.onLine) {
+    import("../stores/syncStore")
+      .then(({ useSync }) => useSync.getState().sync())
+      .catch(() => {});
+  }
 
   return { saleId, billNo, ts };
 }

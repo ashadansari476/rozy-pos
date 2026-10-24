@@ -1,4 +1,4 @@
-import { deleteRemote, isSyncConfigured } from "./syncEngine";
+import { isSyncConfigured, processQueue, queueOperation } from "./syncEngine";
 import { db } from "./db";
 import { hashPass } from "./users";
 
@@ -173,18 +173,15 @@ export async function updateCashier(id, updates) {
 }
 
 export async function deleteCashier(id) {
-  const user = await db.users.get(id);
-  if (user?.role === "owner") throw new Error("Cannot delete owner");
-  // Remove from the cloud too, otherwise the cashier comes back (and can log in) after the next sync.
-  if (isSyncConfigured()) {
-    try {
-      await deleteRemote("users", id);
-    } catch (e) {
-      throw new Error(
-        "Could not remove this cashier from the cloud. Connect to the internet and try again, " +
-        "otherwise they could log in again after the next sync."
-      );
-    }
+  const sync = isSyncConfigured();
+  await db.transaction("rw", [db.users, db.syncQueue], async () => {
+    const user = await db.users.get(id);
+    if (!user) return;
+    if (user.role === "owner") throw new Error("Cannot delete owner");
+    if (sync) await queueOperation("users", id, "delete");
+    await db.users.delete(id);
+  });
+  if (sync && typeof navigator !== "undefined" && navigator.onLine) {
+    processQueue().catch((error) => console.error("Cashier deletion sync remains queued", error));
   }
-  return await db.users.delete(id);
 }

@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { pushSingleProduct } from "./supabase";
-import { pushRecord, isSyncConfigured, deleteRemote, queueOperation } from "./syncEngine";
+import { pushRecord, isSyncConfigured, processQueue, queueOperation } from "./syncEngine";
 
 // ============ PRODUCTS ============
 
@@ -111,16 +111,16 @@ export async function updateProduct(id, product) {
 }
 
 export async function deleteProduct(id) {
-  // Remove from the cloud too. If offline, remember the delete and send it at the next sync,
-  // otherwise the product would reappear after the next pull.
-  if (isSyncConfigured()) {
-    try {
-      await deleteRemote("products", id);
-    } catch (e) {
-      await queueOperation("products", id, "delete", null);
-    }
+  const sync = isSyncConfigured();
+  await db.transaction("rw", [db.products, db.syncQueue], async () => {
+    if (!await db.products.get(id)) return;
+    // The delete intent and local deletion commit together, even while offline.
+    if (sync) await queueOperation("products", id, "delete");
+    await db.products.delete(id);
+  });
+  if (sync && typeof navigator !== "undefined" && navigator.onLine) {
+    processQueue().catch((error) => console.error("Product deletion sync remains queued", error));
   }
-  return await db.products.delete(id);
 }
 
 export async function searchProducts(query, category) {
