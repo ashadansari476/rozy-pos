@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useCustomers } from "../stores/customerStore";
 import { useProducts } from "../stores/productStore";
 import { useApp } from "../stores/appStore";
+import { useShop } from "../stores/shopStore";
 import {
   getAllOrders, getOrderStats, updateOrderStatus,
   deleteOrder, recordOrderPayment, completeOrder,
@@ -24,6 +25,7 @@ const STATUS_META = {
 
 export default function Orders() {
   const user = useApp((s) => s.user);
+  const currentShopId = useShop((s) => s.currentShopId);
   const { products, load: loadProducts } = useProducts();
   const { loadOrders } = useCustomers();
   const [orders, setOrders] = useState([]);
@@ -37,15 +39,29 @@ export default function Orders() {
   const [delivering, setDelivering] = useState(null);
 
   useEffect(() => {
-    (async () => {
-      loadProducts();
-      const [o, s] = await Promise.all([getAllOrders({}), getOrderStats()]);
-      setOrders(o);
-      setStats(s);
-    })();
-  }, [refresh]);
+    if (!currentShopId) return;
+    let cancelled = false;
+    setOrders([]);
+    setStats(null);
+    setEditing(null);
+    setViewing(null);
+    setDelivering(null);
+    setShowModal(false);
+    loadProducts(currentShopId);
+    Promise.all([
+      getAllOrders({ shopId: currentShopId }),
+      getOrderStats(currentShopId),
+    ]).then(([o, stats]) => {
+      if (!cancelled) {
+        setOrders(o);
+        setStats(stats);
+      }
+    }).catch(console.error);
+    return () => { cancelled = true; };
+  }, [refresh, currentShopId]);
 
   const filtered = orders.filter((o) => {
+    if (o.shopId !== currentShopId) return false;
     if (filter !== "all" && o.status !== filter) return false;
     if (search) {
       const q = search.toLowerCase();
