@@ -250,6 +250,8 @@ export async function migrateExistingDataToRozy() {
 
   const stockRows = [];
   for (const p of products) {
+    // Never create a Rozy stock record for a product owned by Warish.
+    if ((p.shopId || "rozy") !== "rozy") continue;
     const key = `rozy-${p.id}`;
     if (!existingKeys.has(key)) {
       stockRows.push({
