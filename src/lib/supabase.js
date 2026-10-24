@@ -32,6 +32,13 @@ export function isSyncEnabled() {
   return !!getSupabaseUrl() && !!getSupabaseKey();
 }
 
+// Never let legacy catalogue helpers cross bakery boundaries.
+function activeShop() {
+  const shop = localStorage.getItem("rozy-pos-current-shop");
+  if (shop !== "rozy" && shop !== "warish") throw new Error("Select a valid bakery before syncing");
+  return shop;
+}
+
 // ---------- HTTP helpers ----------
 async function sbFetch(path, options = {}) {
   const url = getSupabaseUrl();
@@ -79,10 +86,12 @@ function toIso(value) {
 
 // ---------- PRODUCTS SYNC ----------
 export async function pushProducts() {
-  const products = await db.products.toArray();
+  const shop = activeShop();
+  const products = await db.products.where("shopId").equals(shop).toArray();
   if (!products.length) return { pushed: 0 };
 
   const payload = products.map((p) => ({
+    shop_id: shop,
     id: p.id,
     name: p.name,
     category: p.category || null,
@@ -105,7 +114,8 @@ export async function pushProducts() {
 }
 
 export async function pullProducts() {
-  const remote = await sbFetch("/products?select=*");
+  const shop = activeShop();
+  const remote = await sbFetch(`/products?select=*&shop_id=eq.${shop}`);
   if (!remote || !Array.isArray(remote)) return { pulled: 0, updated: 0 };
 
   let pulled = 0;
@@ -118,6 +128,7 @@ export async function pullProducts() {
     if (!local) {
       await db.products.put({
         id: r.id,
+        shopId: shop,
         name: r.name,
         category: r.category,
         unit: r.unit,
@@ -133,6 +144,7 @@ export async function pullProducts() {
     } else if (remoteUpdated > (local.updatedAt || 0)) {
       await db.products.put({
         ...local,
+        shopId: shop,
         name: r.name,
         category: r.category,
         unit: r.unit,
@@ -154,8 +166,11 @@ export async function pushSingleProduct(productId) {
   if (!isSyncEnabled()) return;
   const p = await db.products.get(productId);
   if (!p) return;
+  const shop = activeShop();
+  if (p.shopId !== shop) throw new Error("Blocked cross-bakery product upload");
 
   const payload = {
+    shop_id: shop,
     id: p.id,
     name: p.name,
     category: p.category || null,
@@ -182,7 +197,8 @@ export async function pushSingleProduct(productId) {
 export async function deleteProductRemote(productId) {
   if (!isSyncEnabled()) return;
   try {
-    await sbFetch(`/products?id=eq.${productId}`, { method: "DELETE" });
+    const shop = activeShop();
+    await sbFetch(`/products?id=eq.${encodeURIComponent(productId)}&shop_id=eq.${shop}`, { method: "DELETE" });
   } catch (e) {
     console.warn("Delete product remote failed:", e.message);
   }
@@ -190,10 +206,12 @@ export async function deleteProductRemote(productId) {
 
 // ---------- CATEGORIES SYNC ----------
 export async function pushCategories() {
-  const categories = await db.categories.toArray();
+  const shop = activeShop();
+  const categories = await db.categories.where("shopId").equals(shop).toArray();
   if (!categories.length) return;
 
   const payload = categories.map((c) => ({
+    shop_id: shop,
     id: c.id,
     name: c.name,
     icon: c.icon || "📦",
@@ -209,7 +227,8 @@ export async function pushCategories() {
 }
 
 export async function pullCategories() {
-  const remote = await sbFetch("/categories?select=*");
+  const shop = activeShop();
+  const remote = await sbFetch(`/categories?select=*&shop_id=eq.${shop}`);
   if (!remote || !Array.isArray(remote)) return;
 
   for (const r of remote) {
@@ -217,6 +236,7 @@ export async function pullCategories() {
     if (!local) {
       await db.categories.put({
         id: r.id,
+        shopId: shop,
         name: r.name,
         icon: r.icon || "📦",
         sortOrder: r.sort_order || 0,
@@ -229,7 +249,11 @@ export async function pullCategories() {
 export async function fullSync() {
   if (!isSyncEnabled()) throw new Error("Sync not configured");
 
-  const results = { products: null, categories: null };
+  // The legacy bulk push is unsafe: it can overwrite newer cloud records.
+  // Use the durable, change-driven syncEngine.fullSync instead.
+  throw new Error("Legacy fullSync is disabled; use syncEngine.fullSync");
+
+  /* const results = { products: null, categories: null };
 
   results.products = await pullProducts();
   await pullCategories();
@@ -239,7 +263,7 @@ export async function fullSync() {
 
   await pullProducts();
 
-  return results;
+  return results; */
 }
 
 // ---------- AUTO SYNC ----------
