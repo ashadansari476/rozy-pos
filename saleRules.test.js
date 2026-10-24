@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { validateSaleItems, remainingStockAfterSale } from "./src/lib/saleRules.js";
+import { validateSaleItems, remainingStockAfterSale, assertSaleProductShop } from "./src/lib/saleRules.js";
 
 const item = (qty, price, cost = 0) => ({ id: 123, qty, price, cost });
 test("offline checkout accepts valid sale line items without network dependencies", () => {
@@ -20,4 +20,12 @@ test("stock subtraction never silently loses oversold units", () => {
   assert.equal(remainingStockAfterSale(0.3, 0.3), 0);
   assert.throws(() => remainingStockAfterSale(2, 3), /Insufficient stock/);
   assert.throws(() => remainingStockAfterSale(NaN, 1), /Invalid existing stock/);
+});
+
+test("offline checkout rejects products from another bakery", () => {
+  assert.doesNotThrow(() => assertSaleProductShop({ id: 1 }, "rozy"));
+  assert.doesNotThrow(() => assertSaleProductShop({ id: 2, shopId: "warish" }, "warish"));
+  assert.throws(() => assertSaleProductShop({ id: 2, shopId: "warish" }, "rozy"), /another shop/);
+  assert.throws(() => assertSaleProductShop({ id: 1 }, "warish"), /another shop/);
+  assert.throws(() => assertSaleProductShop(undefined, "rozy"), /unknown product/);
 });

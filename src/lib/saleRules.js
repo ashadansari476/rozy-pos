@@ -18,3 +18,9 @@ export function remainingStockAfterSale(stock, qty) {
   if (!Number.isFinite(remaining) || remaining < -1e-9) throw new Error("Insufficient stock for sale");
   return Math.max(0, remaining);
 }
+
+/** Reject cross-shop and unknown products before committing a sale. */
+export function assertSaleProductShop(product, shopId) {
+  if (!product) throw new Error("Cannot sell an unknown product");
+  if ((product.shopId || "rozy") !== shopId) throw new Error("Cannot sell a product from another shop");
+}

@@ -1,7 +1,7 @@
 import { db, getDeviceTag } from "./db";
 import { isSyncConfigured, processQueue, queueOperation } from "./syncEngine";
 import { netCash } from "./money";
-import { validateSaleItems, remainingStockAfterSale } from "./saleRules";
+import { validateSaleItems, remainingStockAfterSale, assertSaleProductShop } from "./saleRules";
 
 // Helper — get current shop ID
 function getCurrentShopId() {
@@ -39,8 +39,12 @@ export async function saveSale({
 
   await db.transaction(
     "rw",
-    [db.sales, db.saleItems, db.shopStock, db.stockMovements, db.auditLog, db.settings, db.syncQueue],
+    [db.sales, db.saleItems, db.products, db.shopStock, db.stockMovements, db.auditLog, db.settings, db.syncQueue],
     async () => {
+      // Verify product ownership before creating any sale or decrementing stock.
+      for (const it of items) {
+        assertSaleProductShop(await db.products.get(it.id), shop);
+      }
       billNo = await nextBillNumber(shop);
 
       saleId = await db.sales.add({
@@ -76,7 +80,7 @@ export async function saveSale({
           .where("[shopId+productId]")
           .equals([shop, it.id])
           .first();
-        if (!existing) continue;
+        if (!existing) throw new Error(`Missing stock record for product ${it.id} in ${shop}`);
 
         const newStock = remainingStockAfterSale(existing.stock ?? 0, it.qty);
         await db.shopStock.update(existing.id, { stock: newStock, updatedAt: ts });
