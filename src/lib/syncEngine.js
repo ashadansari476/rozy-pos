@@ -354,6 +354,21 @@ export async function pushTable(tableName, records) {
   const config = SYNC_TABLES.find((t) => t.name === tableName);
   if (!config) return { pushed: 0 };
 
+  // Fail closed: a malformed or cross-shop queued record must never reach Supabase.
+  // Child tables are checked against their parent by the server RLS migration.
+  const shopScoped = !["saleItems", "orderItems", "purchaseItems"].includes(tableName);
+  const activeShop = localStorage.getItem("rozy-pos-current-shop");
+  if (shopScoped) {
+    if (activeShop !== "rozy" && activeShop !== "warish") {
+      throw new Error("Select a valid bakery before cloud sync");
+    }
+    for (const record of records) {
+      if (record.shopId !== activeShop) {
+        throw new Error(`Blocked ${tableName} sync: record bakery does not match active bakery`);
+      }
+    }
+  }
+
   const payload = records.map((r) => {
     const cloud = toCloud(r, tableName);
     delete cloud.syncVersion;
