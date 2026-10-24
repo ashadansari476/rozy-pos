@@ -88,7 +88,7 @@ async function freshToken() {
           return s.access_token;
         }
         signOutSync(); // refresh token rejected: needs a new sign-in
-        return null;
+        throw new Error("Cloud sync session expired; sign in again");
       })
       .finally(() => {
         refreshing = null;
@@ -101,5 +101,6 @@ async function freshToken() {
 export async function authHeaders() {
   const key = localStorage.getItem(KEY_KEY) || "";
   const token = await freshToken();
-  return { apikey: key, Authorization: `Bearer ${token || key}` };
+  if (!token) throw new Error("Sign in to your cloud sync account before syncing");
+  return { apikey: key, Authorization: `Bearer ${token}` };
 }
