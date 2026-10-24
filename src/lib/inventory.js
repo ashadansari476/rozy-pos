@@ -12,6 +12,9 @@ export async function adjustStock({ productId, qty, reason, note, cost, user }) 
   if (!Number.isFinite(qty) || qty === 0) {
     throw new Error("Stock adjustment quantity must be a finite, non-zero number");
   }
+  if (cost !== undefined && cost !== null && (!Number.isFinite(cost) || cost < 0)) {
+    throw new Error("Stock adjustment cost must be a non-negative finite number");
+  }
 
   const product = await db.products.get(productId);
   if (!product) throw new Error("Product not found");
@@ -81,6 +84,9 @@ export async function recordWastage({ productId, qty, reason, note, user }) {
 
   if (!Number.isFinite(qty) || qty <= 0) {
     throw new Error("Wastage quantity must be a positive number");
+  }
+  if (!Number.isFinite(product.cost ?? 0) || (product.cost ?? 0) < 0) {
+    throw new Error("Product cost must be a non-negative finite number");
   }
 
   const shopId = getCurrentShopId();
