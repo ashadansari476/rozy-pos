@@ -108,21 +108,33 @@ export async function searchProducts(query, category) {
 
 // ============ CATEGORIES ============
 
+function currentShop() {
+  return localStorage.getItem("rozy-pos-current-shop") || "rozy";
+}
+
 export async function getCategories() {
-  return await db.categories.orderBy("sortOrder").toArray();
+  const shopId = currentShop();
+  return (await db.categories.orderBy("sortOrder").toArray())
+    .filter((c) => (c.shopId || "rozy") === shopId);
 }
 
 export async function addCategory({ name, icon }) {
-  const count = await db.categories.count();
-  return await db.categories.add({ name, icon: icon || "📦", sortOrder: count + 1 });
+  const shopId = currentShop();
+  const count = (await getCategories()).length;
+  return db.categories.add({ shopId, name, icon: icon || "📦", sortOrder: count + 1 });
 }
 
 export async function updateCategory(id, data) {
-  return await db.categories.update(id, data);
+  const category = await db.categories.get(id);
+  if (!category || (category.shopId || "rozy") !== currentShop()) throw new Error("Category belongs to another shop");
+  const { id: ignoredId, shopId: ignoredShop, ...safe } = data;
+  return db.categories.update(id, safe);
 }
 
 export async function deleteCategory(id) {
-  return await db.categories.delete(id);
+  const category = await db.categories.get(id);
+  if (!category || (category.shopId || "rozy") !== currentShop()) throw new Error("Category belongs to another shop");
+  return db.categories.delete(id);
 }
 
 // ============ BULK IMPORT ============
