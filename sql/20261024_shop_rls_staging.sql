@@ -52,7 +52,11 @@ BEGIN
   EXECUTE format('DROP POLICY IF EXISTS pos_shop_update ON public.%I',t);
   EXECUTE format('DROP POLICY IF EXISTS pos_shop_delete ON public.%I',t);
   EXECUTE format('CREATE POLICY pos_shop_read ON public.%I FOR SELECT TO authenticated USING (public.pos_has_shop_access(shop_id))',t);
-  EXECUTE format('CREATE POLICY pos_shop_insert ON public.%I FOR INSERT TO authenticated WITH CHECK (public.pos_has_shop_access(shop_id))',t);
+  IF t IN ('products','categories','pos_users','targets','cash_drawer','audit_log') THEN
+   EXECUTE format('CREATE POLICY pos_shop_insert ON public.%I FOR INSERT TO authenticated WITH CHECK (public.pos_is_shop_owner(shop_id))',t);
+  ELSE
+   EXECUTE format('CREATE POLICY pos_shop_insert ON public.%I FOR INSERT TO authenticated WITH CHECK (public.pos_has_shop_access(shop_id))',t);
+  END IF;
   EXECUTE format('CREATE POLICY pos_shop_update ON public.%I FOR UPDATE TO authenticated USING (public.pos_is_shop_owner(shop_id)) WITH CHECK (public.pos_is_shop_owner(shop_id))',t);
   EXECUTE format('CREATE POLICY pos_shop_delete ON public.%I FOR DELETE TO authenticated USING (public.pos_is_shop_owner(shop_id))',t);
  END LOOP;
