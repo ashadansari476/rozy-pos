@@ -28,6 +28,39 @@ db.version(7).stores({
   syncQueue: "++id, table, recordId, action, status, createdAt",
 });
 
+// Shop-specific catalogue indexes. Existing untagged rows remain Rozy's
+// legacy data; no destructive product/category copy is performed.
+db.version(8).stores({
+  products: "++id, shopId, [shopId+name], name, category, barcode",
+  categories: "++id, shopId, [shopId+name], name, sortOrder",
+  settings: "key",
+  shopStock: "++id, [shopId+productId], shopId, productId, stock",
+  sales: "++id, shopId, billNo, ts, cashier, customerId",
+  saleItems: "++id, saleId, productId",
+  batches: "++id, shopId, productId, expiryDate",
+  wastage: "++id, shopId, productId, ts",
+  stockMovements: "++id, shopId, productId, ts, reason",
+  purchases: "++id, shopId, supplierId, ts",
+  purchaseItems: "++id, purchaseId, productId",
+  suppliers: "++id, shopId, name",
+  customers: "++id, shopId, phone, name",
+  orders: "++id, shopId, customerId, status, deliveryDate",
+  orderItems: "++id, orderId, productId",
+  payments: "++id, shopId, orderId, ts, type",
+  expenses: "++id, shopId, ts, category",
+  targets: "++id, [shopId+date], shopId, date",
+  users: "++id, shopId, username, role",
+  auditLog: "++id, shopId, ts, user, action, entity",
+  cashDrawer: "++id, [shopId+date], shopId, date",
+  syncQueue: "++id, table, recordId, action, status, createdAt",
+}).upgrade(async (tx) => {
+  for (const tableName of ["products", "categories"]) {
+    await tx.table(tableName).toCollection().modify((row) => {
+      if (!row.shopId) row.shopId = "rozy";
+    });
+  }
+});
+
 // ========== DEVICE-SAFE IDS ==========
 // Every device used to number its records 1, 2, 3 ... and push them to the cloud with
 // that number as the primary key. Two devices (two shops, a phone and a laptop) then
@@ -116,10 +149,10 @@ export async function bootstrapSettings() {
   const categoryCount = await db.categories.count();
   if (categoryCount === 0) {
     await db.categories.bulkPut([
-      { name: "Bakery", sortOrder: 1, icon: "🥖" },
-      { name: "Sweets", sortOrder: 2, icon: "🍬" },
-      { name: "Snacks", sortOrder: 3, icon: "🥨" },
-      { name: "Beverages", sortOrder: 4, icon: "☕" },
+      { shopId: "rozy", name: "Bakery", sortOrder: 1, icon: "🥖" },
+      { shopId: "rozy", name: "Sweets", sortOrder: 2, icon: "🍬" },
+      { shopId: "rozy", name: "Snacks", sortOrder: 3, icon: "🥨" },
+      { shopId: "rozy", name: "Beverages", sortOrder: 4, icon: "☕" },
     ]);
   }
 
@@ -168,7 +201,7 @@ async function dedupeCategories() {
   const toDelete = [];
 
   for (const c of all) {
-    const key = (c.name || "").toLowerCase().trim();
+    const key = JSON.stringify([c.shopId || "rozy", (c.name || "").toLowerCase().trim()]);
     if (!key) continue;
     if (seen.has(key)) {
       toDelete.push(c.id);
