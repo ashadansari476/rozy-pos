@@ -444,7 +444,7 @@ export async function getMovements({ productId, from, to, limit = 100 } = {}) {
 
 export async function getInventoryStats(shopId = getCurrentShopId()) {
   const [products, stockRows] = await Promise.all([
-    db.products.toArray(),
+    db.products.where("shopId").equals(shopId).toArray(),
     db.shopStock.where("shopId").equals(shopId).toArray(),
   ]);
   const stockByProduct = new Map(stockRows.map((row) => [row.productId, row]));
