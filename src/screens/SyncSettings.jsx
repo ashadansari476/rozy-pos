@@ -6,6 +6,7 @@ import {
 } from "../lib/supabase";
 import { Cloud, Check, X, RefreshCw, Save, AlertTriangle } from "lucide-react";
 import { fullSync, processQueue, getSyncQueueStatus, retryFailedSyncOperation } from "../lib/syncEngine";
+import { runReadOnlyCloudDiagnostics } from "../lib/syncDiagnostics";
 import { getSyncAccount, signInSync, signOutSync } from "../lib/supabaseAuth";
 
 export default function SyncSettings() {
@@ -20,6 +21,8 @@ export default function SyncSettings() {
   const [email, setEmail] = useState(getSyncAccount()?.email || "");
   const [pass, setPass] = useState("");
   const [signingIn, setSigningIn] = useState(false);
+  const [diagnosing, setDiagnosing] = useState(false);
+  const [diagnosis, setDiagnosis] = useState(null);
 
   useEffect(() => {
     refreshStatus();
@@ -70,6 +73,19 @@ export default function SyncSettings() {
       alert("Sync failed: " + e.message);
     }
     setSyncing(false);
+  };
+
+  const handleDiagnose = async () => {
+    setDiagnosing(true);
+    setDiagnosis(null);
+    try {
+      const result = await runReadOnlyCloudDiagnostics();
+      setDiagnosis(result);
+    } catch (error) {
+      setDiagnosis({ ok: false, passed: 0, total: 0, errors: [error.message] });
+    } finally {
+      setDiagnosing(false);
+    }
   };
 
   const handleRetryFailed = async () => {
@@ -275,6 +291,27 @@ export default function SyncSettings() {
       {status?.connected && (
         <div className="card p-5 mb-5">
           <h2 className="font-semibold text-ink mb-2">Sync</h2>
+          <p className="text-xs text-ink-muted mb-3">
+            Read-only cloud diagnostics verify authenticated REST access to both bakeries
+            and confirm anonymous reads are blocked. No test records are created.
+          </p>
+          <button
+            onClick={handleDiagnose}
+            disabled={diagnosing || syncing}
+            className="btn-outline mb-3"
+          >
+            <RefreshCw size={14} /> {diagnosing ? "Running checks..." : "Run Read-Only Cloud Diagnostics"}
+          </button>
+          {diagnosis && (
+            <div className="border border-border rounded-xl p-3 mb-3 text-xs">
+              <div className="font-semibold">
+                {diagnosis.ok ? "✅ PASS" : "❌ CHECK FAILED"} — {diagnosis.passed}/{diagnosis.total} checks
+              </div>
+              {diagnosis.errors?.map((error, index) => (
+                <div key={index} className="mt-1 break-words">{error}</div>
+              ))}
+            </div>
+          )}
           <p className="text-xs text-ink-muted mb-4">
             <b>Sync Now:</b> Process queued changes and pull shop records; it does not upload all historical local records.<br />
             <b>Retry Failed:</b> Retry failed operations without deleting pending sales, orders or payments.
